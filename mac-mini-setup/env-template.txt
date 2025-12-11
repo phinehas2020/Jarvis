@@ -1,0 +1,10 @@
+# BlueBubbles Configuration
+# Find these in BlueBubbles app > Settings > API
+BLUEBUBBLES_URL=http://localhost:1234
+BLUEBUBBLES_PASSWORD=your_bluebubbles_password_here
+
+# MCP Server Configuration
+MCP_PORT=3000
+# Generate a secure token with: openssl rand -hex 32
+MCP_BEARER_TOKEN=your_secure_random_token_here
+
