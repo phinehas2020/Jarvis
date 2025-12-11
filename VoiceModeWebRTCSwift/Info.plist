@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>voip</string>
+		<string>background-processing</string>
+	</array>
+	<key>NSContactsUsageDescription</key>
+	<string>Jarvis needs access to your contacts to help you send messages to people by name.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Jarvis needs access to your calendar to create, edit, and manage your events.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Jarvis needs access to your reminders to create, edit, and manage your tasks.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Jarvis needs full reminders access so it can read and update your tasks end-to-end.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Jarvis needs access to your photo library to save screenshots.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Jarvis may need location access for enhanced features and context.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Jarvis needs microphone access for voice conversations.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Jarvis needs camera access for video features and visual input.</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Jarvis needs access to your music library to control playback and get information about currently playing songs.</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>Jarvis needs notification access to help manage alarms and reminders.</string>
+	<key>NSIntentsUsageDescription</key>
+	<string>Jarvis needs access to run iOS Shortcuts and integrate with system features.</string>
+</dict>
+</plist>

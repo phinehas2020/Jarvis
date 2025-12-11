@@ -1,0 +1,25 @@
+{
+  "name": "jarvis-with-mcp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PallavAg/VoiceModeWebRTCSwift.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/PallavAg/VoiceModeWebRTCSwift/issues"
+  },
+  "homepage": "https://github.com/PallavAg/VoiceModeWebRTCSwift#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.1",
+    "ws": "^8.18.3"
+  }
+}

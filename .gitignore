@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# macOS
+.DS_Store
+*.DS_Store
+
+# Xcode user data
+*.xcuserstate
+xcuserdata/
+
+# Build outputs
+build/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+Packages/
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# API Keys (never commit real keys)
+# Keep placeholders only
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary files
+*.tmp
+*.temp
+
