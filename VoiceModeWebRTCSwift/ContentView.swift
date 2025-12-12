@@ -15,6 +15,8 @@ struct ContentView: View {
     
     // AppStorage properties
     @AppStorage("apiKey") private var apiKey = API_KEY
+    @AppStorage("humeApiKey") private var humeApiKey = ""
+    @AppStorage("humeSecretKey") private var humeSecretKey = ""
     @AppStorage("customMcpEnabled") private var customMcpEnabled = true
     @AppStorage("customMcpServerUrl") private var customMcpServerUrl = ""
     @AppStorage("customMcpServerLabel") private var customMcpServerLabel = "bluebubbles"
