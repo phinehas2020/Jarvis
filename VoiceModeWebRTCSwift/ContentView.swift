@@ -146,6 +146,13 @@ struct ContentView: View {
     @AppStorage("selectedModel") private var selectedModel = "gpt-realtime"
     @AppStorage("selectedVoice") private var selectedVoice = "echo"
     @AppStorage("showTextOutput") private var showTextOutput = true
+    @AppStorage("humeApiKey") private var humeApiKey = ""
+    @AppStorage("selectedProviderRaw") private var selectedProviderRaw = "OpenAI Realtime" // Default to OpenAI
+    
+    private var selectedProvider: WebRTCManager.VoiceProvider {
+        get { WebRTCManager.VoiceProvider(rawValue: selectedProviderRaw) ?? .openAI }
+        set { selectedProviderRaw = newValue.rawValue }
+    }
     
     // Constants
     private let modelOptions = [
@@ -248,9 +255,11 @@ struct ContentView: View {
         .sheet(isPresented: $showOptionsSheet) {
             OptionsView(
                 apiKey: $apiKey,
+                humeApiKey: $humeApiKey,
                 systemMessage: $systemMessage,
                 selectedModel: $selectedModel,
                 selectedVoice: $selectedVoice,
+                selectedProviderRaw: $selectedProviderRaw,
                 showTextOutput: $showTextOutput,
                 customMcpEnabled: $customMcpEnabled,
                 customMcpServerUrl: $customMcpServerUrl,
@@ -263,6 +272,8 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .startConversation)) { _ in
             webrtcManager.startConnection(
                 apiKey: apiKey,
+                humeApiKey: humeApiKey,
+                provider: selectedProvider,
                 modelName: selectedModel,
                 systemMessage: systemMessage,
                 voice: selectedVoice
@@ -360,6 +371,8 @@ struct ContentView: View {
                             
                             webrtcManager.startConnection(
                                 apiKey: apiKey,
+                                humeApiKey: humeApiKey,
+                                provider: selectedProvider,
                                 modelName: selectedModel,
                                 systemMessage: systemMessage,
                                 voice: selectedVoice
@@ -438,12 +451,7 @@ struct ContentView: View {
                                 .font(.system(size: 14))
                             Text("Video")
                                 .font(.system(size: 8))
-                                .foregroundColor(currentModelSupportsVision ? .secondary : .gray)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!currentModelSupportsVision)
-                    .accessibilityLabel(currentModelSupportsVision ? (webrtcManager.isVideoEnabled ? "Disable video" : "Enable video") : "Video not supported by this model")
+                .accessibilityLabel(currentModelSupportsVision ? (webrtcManager.isVideoEnabled ? "Disable video" : "Enable video") : "Video not supported by this model")
                     
                     // Camera on/off button (only when video is enabled and vision is supported)
                     if webrtcManager.isVideoEnabled && currentModelSupportsVision {
@@ -581,9 +589,12 @@ struct ContentView: View {
 
 struct OptionsView: View {
     @Binding var apiKey: String
+    @Binding var humeApiKey: String
+    @Binding var humeSecretKey: String
     @Binding var systemMessage: String
     @Binding var selectedModel: String
     @Binding var selectedVoice: String
+    @Binding var selectedProviderRaw: String
     @Binding var showTextOutput: Bool
     @Binding var customMcpEnabled: Bool
     @Binding var customMcpServerUrl: String
@@ -608,67 +619,97 @@ struct OptionsView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section(header: Text("Model")) {
-                    Picker("Model", selection: $selectedModel) {
-                        ForEach(modelOptions, id: \.self) { model in
-                            HStack {
-                                Text(model)
-                                Spacer()
-                                if model.contains("realtime") && !model.contains("4o") {
-                                    Image(systemName: "eye.fill")
-                                        .foregroundColor(.blue)
-                                        .font(.caption)
-                                } else if model.contains("realtime") {
-                                    Image(systemName: "eye.slash.fill")
-                                        .foregroundColor(.orange)
-                                        .font(.caption)
-                                } else {
-                                    Image(systemName: "eye.slash.fill")
-                                        .foregroundColor(.gray)
-                                        .font(.caption)
+                Section(header: Text("Voice Provider")) {
+                    Picker("Provider", selection: $selectedProviderRaw) {
+                        ForEach(WebRTCManager.VoiceProvider.allCases) { provider in
+                            Text(provider.rawValue).tag(provider.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                
+                if selectedProviderRaw == WebRTCManager.VoiceProvider.hume.rawValue {
+                   Section(header: Text("Hume AI Configuration")) {
+                       TextField("Enter Hume API Key", text: $humeApiKey)
+                           .autocapitalization(.none)
+                       
+                       SecureField("Enter Hume Secret Key", text: $humeSecretKey)
+                           .autocapitalization(.none)
+                       
+                       Text("The Secret Key is used to generate a secure access token.")
+                           .font(.caption)
+                           .foregroundColor(.secondary)
+                   }
+                }
+                
+                if selectedProviderRaw == WebRTCManager.VoiceProvider.openAI.rawValue {
+                    Section(header: Text("OpenAI API Key")) {
+                        TextField("Enter OpenAI API Key", text: $apiKey)
+                            .autocapitalization(.none)
+                    }
+                    
+                    Section(header: Text("Model")) {
+                        Picker("Model", selection: $selectedModel) {
+                            ForEach(modelOptions, id: \.self) { model in
+                                HStack {
+                                    Text(model)
+                                    Spacer()
+                                    if model.contains("realtime") && !model.contains("4o") {
+                                        Image(systemName: "eye.fill")
+                                            .foregroundColor(.blue)
+                                            .font(.caption)
+                                    } else if model.contains("realtime") {
+                                        Image(systemName: "eye.slash.fill")
+                                            .foregroundColor(.orange)
+                                            .font(.caption)
+                                    } else {
+                                        Image(systemName: "eye.slash.fill")
+                                            .foregroundColor(.gray)
+                                            .font(.caption)
+                                    }
                                 }
                             }
                         }
-                    }
-                    .pickerStyle(.menu)
-                    
-                    if !currentModelSupportsVision {
-                        HStack {
-                            Image(systemName: "info.circle.fill")
-                                .foregroundColor(.orange)
-                            Text("This model doesn't support video/vision. Video features will be disabled.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                        .pickerStyle(.menu)
+                        
+                        // Vision capability info
+                        if !currentModelSupportsVision {
+                            HStack {
+                                Image(systemName: "info.circle.fill")
+                                    .foregroundColor(.orange)
+                                Text("This model doesn't support video/vision. Video features will be disabled.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.top, 4)
                         }
-                        .padding(.top, 4)
+                        
+                        if !isRealtimeModel {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundColor(.red)
+                                Text("This model is not yet supported. Please use a realtime model (gpt-realtime) for now.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.top, 4)
+                        }
                     }
                     
-                    if !isRealtimeModel {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
-                            Text("This model is not yet supported. Please use a realtime model (gpt-realtime) for now.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                    Section(header: Text("Voice")) {
+                        Picker("Voice", selection: $selectedVoice) {
+                            ForEach(voiceOptions, id: \.self) { voice in
+                                Text(voice.capitalized)
+                            }
                         }
-                        .padding(.top, 4)
+                        .pickerStyle(.menu)
                     }
                 }
                 
-                Section(header: Text("Voice")) {
-                    Picker("Voice", selection: $selectedVoice) {
-                        ForEach(voiceOptions, id: \.self) {
-                            Text($0.capitalized)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                }
-                
-                Section(header: Text("Display Options")) {
-                    Toggle("Show Text Output", isOn: $showTextOutput)
-                    Text("Disable text output to save API costs. Audio will still work.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                Section(header: Text("System Message")) {
+                    TextEditor(text: $systemMessage)
+                        .frame(minHeight: 100)
+                        .cornerRadius(5)
                 }
                 
                 Section(header: Text("Custom MCP Server")) {
@@ -676,19 +717,19 @@ struct OptionsView: View {
                     
                     if customMcpEnabled {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Server Label")
+                            Text("Server Label (e.g. bluebubbles)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            TextField("e.g., my-server", text: $customMcpServerLabel)
+                            TextField("server_label", text: $customMcpServerLabel)
                                 .autocapitalization(.none)
                                 .textFieldStyle(.roundedBorder)
                         }
                         
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Server URL")
+                            Text("Server URL (SSE Endpoint)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            TextField("e.g., https://my-mcp-server.com", text: $customMcpServerUrl)
+                            TextField("https://example.com/sse", text: $customMcpServerUrl)
                                 .autocapitalization(.none)
                                 .keyboardType(.URL)
                                 .textFieldStyle(.roundedBorder)
@@ -710,15 +751,11 @@ struct OptionsView: View {
                     }
                 }
                 
-                Section(header: Text("API Key")) {
-                    TextField("Enter API Key", text: $apiKey)
-                        .autocapitalization(.none)
-                }
-                
-                Section(header: Text("System Message")) {
-                    TextEditor(text: $systemMessage)
-                        .frame(minHeight: 100)
-                        .cornerRadius(5)
+                Section(header: Text("Preferences")) {
+                    Toggle("Show Text Transcript", isOn: $showTextOutput)
+                    Text("Disable text output to save API costs. Audio will still work.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
             .navigationTitle("Options")

@@ -85,6 +85,18 @@ class WebRTCManager: NSObject, ObservableObject {
         "run_shortcut"
     ]
     
+    // Voice Provider Configuration
+    enum VoiceProvider: String, CaseIterable, Identifiable {
+        case openAI = "OpenAI Realtime"
+        case hume = "Hume AI (EVI)"
+        
+        var id: String { self.rawValue }
+    }
+    
+    @Published var currentProvider: VoiceProvider = .openAI
+    private var humeApiKey: String = ""
+    private var humeSecretKey: String = ""
+    
     // WebRTC references
     private var peerConnection: RTCPeerConnection?
     private var dataChannel: RTCDataChannel?
@@ -2832,14 +2844,45 @@ class WebRTCManager: NSObject, ObservableObject {
         }
     }
     
+
     /// Start a WebRTC connection using a standard API key for local testing.
     func startConnection(
         apiKey: String,
+        humeApiKey: String? = nil,
+        humeSecretKey: String? = nil,
+        provider: VoiceProvider = .openAI,
         modelName: String,
         systemMessage: String,
         voice: String
     ) {
+        self.currentProvider = provider
+        if let hKey = humeApiKey {
+            self.humeApiKey = hKey
+        }
+        if let sKey = humeSecretKey {
+            self.humeSecretKey = sKey
+        }
+        
         conversation.removeAll()
+        conversationMap.removeAll()
+        
+        if provider == .hume {
+            print("🚀 Starting Hume AI connection...")
+            // Placeholder: Add a system message to the conversation
+            let systemItem = ConversationItem(
+                id: UUID().uuidString,
+                role: "system",
+                text: "Hume AI integration is currently a placeholder. Please check back later for full audio streaming support."
+            )
+            DispatchQueue.main.async {
+                self.conversation.append(systemItem)
+            }
+             self.connectionStatus = .disconnected
+            return
+        }
+        
+        // OpenAI Logic below
+
         conversationMap.removeAll()
 
         // Store updated config
@@ -4080,8 +4123,9 @@ class WebRTCManager: NSObject, ObservableObject {
                     requestAssistantResponseAfterTool(context: "mcp_call_output")
                 case "function_call":
                     let functionName = item["name"] as? String ?? "function_call"
-                    print("🔧 Function call \(functionName) completed with output.")
-                    requestAssistantResponseAfterTool(context: "function_call_output:\(functionName)")
+                    print("🔧 Function call request received: \(functionName)")
+                    // DO NOT trigger response here. We must execute the function and send output first.
+                    // The function execution logic (handleLocalFunctionCall) will trigger the response when done.
                 default:
                     break
                 }
