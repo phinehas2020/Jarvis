@@ -31,7 +31,7 @@ final class GeminiLiveClient: NSObject {
     private var converterInputFormat: AVAudioFormat?
     private var converterOutputFormat: AVAudioFormat?
 
-    private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService/BidiGenerateContent"
+    private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
     init(apiKey: String, model: String, systemPrompt: String, endpointUrlString: String = GeminiLiveClient.defaultEndpointUrlString) {
         self.apiKey = apiKey
