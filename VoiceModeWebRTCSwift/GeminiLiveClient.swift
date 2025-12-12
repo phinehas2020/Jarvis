@@ -105,7 +105,7 @@ final class GeminiLiveClient: NSObject {
             urlString = "\(endpoint)\(separator)key=\(apiKey)"
         }
 
-        print("🔌 Gemini Live WS connecting: \(urlString)")
+        print("🔌 Gemini Live WS connecting: \(redactApiKey(urlString))")
 
         guard let url = URL(string: urlString) else {
             connectNextEndpoint()
@@ -196,6 +196,7 @@ final class GeminiLiveClient: NSObject {
         guard isReadyForAudio else { return }
         guard !isAwaitingModelResponse else { return }
         guard !isPlayingAssistantAudio() else { return }
+        guard vadHasDetectedSpeechInCurrentTurn else { return }
 
         let base64 = pcm16Data.base64EncodedString()
         let message: [String: Any] = [
@@ -216,27 +217,6 @@ final class GeminiLiveClient: NSObject {
             print("🎤 Sent \(audioChunkCounter) audio chunks (\(pcm16Data.count) bytes @ \(sampleRate)Hz)")
         }
         
-        sendJSON(message)
-    }
-
-    private func sendAudioTurnStartIfNeeded() {
-        guard isConnected else { return }
-        guard isReadyForAudio else { return }
-
-        let message: [String: Any] = [
-            "clientContent": [
-                "turns": [
-                    [
-                        "role": "user",
-                        "parts": [
-                            ["text": " "]
-                        ]
-                    ]
-                ]
-            ]
-        ]
-
-        print("📤 Starting audio turn (clientContent)")
         sendJSON(message)
     }
 
@@ -574,9 +554,6 @@ final class GeminiLiveClient: NSObject {
         }
 
         if isSpeech {
-            if !vadHasDetectedSpeechInCurrentTurn {
-                sendAudioTurnStartIfNeeded()
-            }
             vadHasDetectedSpeechInCurrentTurn = true
             vadSilenceBeganUptime = nil
             return
@@ -677,6 +654,17 @@ final class GeminiLiveClient: NSObject {
         let isPlaying = pendingPlaybackBuffers > 0
         playbackStateLock.unlock()
         return isPlaying
+    }
+
+    private func redactApiKey(_ urlString: String) -> String {
+        guard var components = URLComponents(string: urlString) else { return urlString }
+        guard let items = components.queryItems, !items.isEmpty else { return urlString }
+
+        components.queryItems = items.map { item in
+            guard item.name.lowercased() == "key", let value = item.value, !value.isEmpty else { return item }
+            return URLQueryItem(name: item.name, value: "REDACTED")
+        }
+        return components.string ?? urlString
     }
 
     private func teardownConnection(notify: Bool) {
