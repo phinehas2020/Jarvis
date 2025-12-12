@@ -421,6 +421,11 @@ final class GeminiLiveClient: NSObject {
                 return
             }
 
+            // CRITICAL FIX: AVAudioConverter doesn't set frameLength automatically
+            // We need to calculate it based on the expected conversion ratio
+            let expectedFrames = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+            convertedBuffer.frameLength = expectedFrames
+
             // Check if we got valid data
             if convertedBuffer.frameLength == 0 {
                 print("⚠️ Converted buffer has 0 frames (input had \(buffer.frameLength) frames)")
