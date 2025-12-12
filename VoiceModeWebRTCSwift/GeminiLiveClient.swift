@@ -94,7 +94,7 @@ final class GeminiLiveClient: NSObject {
             urlString = "\(endpoint)\(separator)key=\(apiKey)"
         }
 
-        print("🔌 Gemini Live WS connecting: \(endpoint)")
+        print("🔌 Gemini Live WS connecting: \(urlString)")
 
         guard let url = URL(string: urlString) else {
             connectNextEndpoint()
