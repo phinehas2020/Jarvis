@@ -139,7 +139,14 @@ class HumeClient: NSObject {
                 "channels": 1
             ],
             "context": [
-                "text": "You are a helpful AI assistant."
+                "text": "You are Jarvis, a helpful, witty, and concise AI assistant."
+            ],
+            "system_prompt": "You are Jarvis. Be concise, helpful, and friendly. Do not be verbose.",
+            "event_messages": [
+                "on_new_chat": [
+                    "enabled": true,
+                    "text": "Hello! I'm listening."
+                ]
             ]
         ]
         
@@ -283,6 +290,11 @@ class HumeClient: NSObject {
         
         let audioData = pcmBuffer.toData()
         let base64 = audioData.base64EncodedString()
+        
+        // Debug: print audio packet size periodically (e.g. random sample) to confirm data flow
+        if Int.random(in: 0...50) == 0 {
+            print("🎤 Sending audio packet: \(audioData.count) bytes")
+        }
         
         let message: [String: Any] = [
             "type": "audio_input",
