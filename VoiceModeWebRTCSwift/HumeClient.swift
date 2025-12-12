@@ -5,6 +5,7 @@ protocol HumeClientDelegate: AnyObject {
     func humeClient(_ client: HumeClient, didChangeStatus status: ConnectionStatus)
     func humeClient(_ client: HumeClient, didReceiveMessage message: ConversationItem)
     func humeClient(_ client: HumeClient, didEncounterError error: Error)
+    func humeClient(_ client: HumeClient, didRequestTool toolName: String, arguments: String, callId: String)
 }
 
 class HumeClient: NSObject {
@@ -39,26 +40,41 @@ class HumeClient: NSObject {
     
     // MARK: - Connection Management
     
-    func connect() {
+    func connect(tools: [[String: Any]] = []) {
         guard !apiKey.isEmpty else {
             delegate?.humeClient(self, didEncounterError: NSError(domain: "HumeClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "API Key is missing"]))
             return
         }
         
         Task {
-            // In a real app, we would use the secret key to mint an access token on the backend.
-            // For now, if Hume supports API Key in headers or query params for WebSocket, we use that.
-            // NOTE: Hume EVI usually requires an access token for the WebSocket.
-            // We will attempt to fetch an access token first if possible, or use the API Key if the endpoint allows.
-            
-            // For this implementation, we'll try to get an access token first.
             let accessToken = await fetchAccessToken()
             guard let token = accessToken else {
                 delegate?.humeClient(self, didEncounterError: NSError(domain: "HumeClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "Failed to generate Access Token"]))
                 return
             }
             
-            startWebSocket(accessToken: token)
+            startWebSocket(accessToken: token, tools: tools)
+        }
+    }
+    
+    // Send tool output back to Hume
+    func sendToolOutput(callId: String, output: String) {
+        let message: [String: Any] = [
+            "type": "tool_response",
+            "tool_call_id": callId,
+            "content": output
+        ]
+        
+        if let jsonData = try? JSONSerialization.data(withJSONObject: message),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            let wsMessage = URLSessionWebSocketTask.Message.string(jsonString)
+            webSocketTask?.send(wsMessage) { error in
+                if let error = error {
+                    print("❌ Failed to send tool response: \(error)")
+                } else {
+                    print("✅ Sent tool response for \(callId)")
+                }
+            }
         }
     }
     
@@ -109,7 +125,7 @@ class HumeClient: NSObject {
     
     // MARK: - WebSocket
     
-    private func startWebSocket(accessToken: String) {
+    private func startWebSocket(accessToken: String, tools: [[String: Any]]) {
         guard let url = URL(string: "\(humeWssUrl)?access_token=\(accessToken)") else { return }
         
         webSocketTask = URLSession.shared.webSocketTask(with: url)
@@ -120,8 +136,8 @@ class HumeClient: NSObject {
         
         receiveMessage()
         
-        // 1. Send session settings first
-        sendSessionSettings()
+        // 1. Send session settings first (with tools)
+        sendSessionSettings(tools: tools)
         
         // 2. Start audio capture only after connection is established
         // 2. Start audio capture with a slight delay to ensure settings are processed
@@ -130,11 +146,11 @@ class HumeClient: NSObject {
         }
     }
     
-    private func sendSessionSettings() {
+    private func sendSessionSettings(tools: [[String: Any]]) {
         // Configure for typical iOS mic input: 44.1kHz or 48kHz.
         // Hume processes raw audio (Linear PCM).
         // Sending session_settings is best practice.
-        let settings: [String: Any] = [
+        var settings: [String: Any] = [
             "type": "session_settings",
             "audio": [
                 "encoding": "linear16",
@@ -152,6 +168,10 @@ class HumeClient: NSObject {
                 ]
             ]
         ]
+        
+        if !tools.isEmpty {
+            settings["tools"] = tools
+        }
         
         if let jsonData = try? JSONSerialization.data(withJSONObject: settings),
            let jsonString = String(data: jsonData, encoding: .utf8) {
@@ -221,6 +241,16 @@ class HumeClient: NSObject {
         case "error":
             if let errorMessage = json["message"] as? String {
                 print("❌ Hume API Error: \(errorMessage)")
+            }
+            
+        case "tool_call":
+            // Handle tool execution request
+            if let toolName = json["name"] as? String,
+               let callId = json["tool_call_id"] as? String,
+               let parameters = json["parameters"] as? String {
+                
+                print("🔧 Hume requested tool: \(toolName)")
+                delegate?.humeClient(self, didRequestTool: toolName, arguments: parameters, callId: callId)
             }
             
         default:
