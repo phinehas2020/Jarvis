@@ -265,9 +265,12 @@ class HumeClient: NSObject {
         guard let playerNode = playerNode else { return }
         audioEngine.attach(playerNode)
         
-        // Default output format (usually 44.1kHz or 48kHz)
-        let outputFormat = audioEngine.outputNode.inputFormat(forBus: 0)
-        audioEngine.connect(playerNode, to: audioEngine.outputNode, format: outputFormat)
+        // Default output format (usually 44.1kHz or 48kHz Stereo)
+        // We MUST connect the player node with the format we intend to play (24kHz Mono)
+        // so the engine can upmix it to the output format.
+        
+        let humeFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: false)
+        audioEngine.connect(playerNode, to: audioEngine.outputNode, format: humeFormat)
         
         do {
             try audioEngine.start()
