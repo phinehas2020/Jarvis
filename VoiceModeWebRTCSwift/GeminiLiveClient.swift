@@ -390,7 +390,10 @@ final class GeminiLiveClient: NSObject {
            let outputFormat = converterOutputFormat {
             let ratio = outputFormat.sampleRate / inputFormat.sampleRate
             let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1)
-            guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrameCapacity) else { return }
+            guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrameCapacity) else {
+                print("❌ Failed to create converted buffer")
+                return
+            }
 
             var conversionError: NSError?
             var didProvideInput = false
@@ -405,10 +408,12 @@ final class GeminiLiveClient: NSObject {
             }
 
             if let conversionError {
+                print("❌ Audio conversion error: \(conversionError.localizedDescription)")
                 delegate?.geminiLiveClient(self, didEncounterError: conversionError)
                 return
             }
             if outputStatus == .error {
+                print("❌ Audio conversion returned error status")
                 delegate?.geminiLiveClient(
                     self,
                     didEncounterError: NSError(domain: "GeminiLiveClient", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to convert microphone audio"])
@@ -416,14 +421,27 @@ final class GeminiLiveClient: NSObject {
                 return
             }
 
-            guard let int16Channel = convertedBuffer.int16ChannelData?[0] else { return }
+            // Check if we got valid data
+            if convertedBuffer.frameLength == 0 {
+                print("⚠️ Converted buffer has 0 frames (input had \(buffer.frameLength) frames)")
+                return
+            }
+
+            guard let int16Channel = convertedBuffer.int16ChannelData?[0] else {
+                print("❌ No int16 channel data after conversion")
+                return
+            }
             let byteCount = Int(convertedBuffer.frameLength) * MemoryLayout<Int16>.size
             let pcmData = Data(bytes: int16Channel, count: byteCount)
             sendAudioChunk(pcmData, sampleRate: Int(outputFormat.sampleRate))
             return
         }
 
-        guard let pcmData = pcm16Data(from: buffer) else { return }
+        // Fallback path without conversion
+        guard let pcmData = pcm16Data(from: buffer) else {
+            print("⚠️ Failed to get PCM data from buffer (frameLength: \(buffer.frameLength))")
+            return
+        }
         sendAudioChunk(pcmData, sampleRate: Int(buffer.format.sampleRate))
     }
 
