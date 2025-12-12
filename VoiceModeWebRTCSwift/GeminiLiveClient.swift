@@ -147,12 +147,12 @@ final class GeminiLiveClient: NSObject {
             "setup": [
                 "model": model,
                 "generationConfig": [
-                    "responseModalities": ["AUDIO"],
-                    "speechConfig": [
-                        "voiceConfig": [
-                            "prebuiltVoiceConfig": [
-                                "voiceName": "Puck"
-                            ]
+                    "responseModalities": ["AUDIO"]
+                ],
+                "speechConfig": [
+                    "voiceConfig": [
+                        "prebuiltVoiceConfig": [
+                            "voiceName": "Puck"
                         ]
                     ]
                 ],
