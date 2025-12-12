@@ -230,3 +230,30 @@ Once everything is running, configure the Jarvis iOS app:
 5. Auth Token: Your `MCP_BEARER_TOKEN` value
 
 Test by asking Jarvis to "send a test message to [phone number]"
+
+## Alternative: macOS LaunchAgents (no pm2)
+
+If you prefer native macOS service management, you can run the bridge and your personal tunnel with LaunchAgents instead of pm2.
+
+Example LaunchAgents:
+- `~/Library/LaunchAgents/com.phinehasadams.imessage-bridge.plist` – runs `/opt/imessage-bridge/server.js` (MCP on port `8788`).
+- `~/Library/LaunchAgents/com.phinehasadams.cloudflared-personal.plist` – runs `cloudflared tunnel` using a personal config (e.g., `~/.cloudflared-personal/config.yml`).
+
+Common commands:
+```bash
+# Enable/start
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.phinehasadams.imessage-bridge.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.phinehasadams.cloudflared-personal.plist
+
+# Restart
+launchctl kickstart -k gui/$(id -u)/com.phinehasadams.imessage-bridge
+launchctl kickstart -k gui/$(id -u)/com.phinehasadams.cloudflared-personal
+
+# Stop/disable
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.phinehasadams.imessage-bridge.plist
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.phinehasadams.cloudflared-personal.plist
+```
+
+Logs default to:
+- Bridge: `~/Library/Logs/imessage-bridge.out.log` / `imessage-bridge.err.log`
+- Tunnel: `~/Library/Logs/cloudflared-personal.out.log` / `cloudflared-personal.err.log`
