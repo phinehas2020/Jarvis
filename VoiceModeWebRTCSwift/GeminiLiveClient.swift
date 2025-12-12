@@ -161,6 +161,8 @@ final class GeminiLiveClient: NSObject {
         sendJSON(message)
     }
 
+    private var audioChunkCounter = 0
+    
     private func sendAudioChunk(_ pcm16Data: Data, sampleRate: Int) {
         guard isConnected else { return }
 
@@ -176,6 +178,11 @@ final class GeminiLiveClient: NSObject {
             ]
         ]
 
+        audioChunkCounter += 1
+        if audioChunkCounter % 100 == 0 {
+            print("🎤 Sent \(audioChunkCounter) audio chunks (\(pcm16Data.count) bytes @ \(sampleRate)Hz)")
+        }
+        
         sendJSON(message)
     }
 
@@ -234,6 +241,13 @@ final class GeminiLiveClient: NSObject {
             return
         }
 
+        // Handle setupComplete
+        if json["setupComplete"] != nil {
+            print("✅ Setup complete - ready to receive audio!")
+            return
+        }
+
+        // Handle errors
         if let error = json["error"] as? [String: Any] {
             let message = (error["message"] as? String) ?? "Gemini Live error"
             print("❌ Gemini Live error: \(message)")
@@ -244,11 +258,25 @@ final class GeminiLiveClient: NSObject {
             return
         }
 
-        guard let serverContent = json["serverContent"] as? [String: Any] else {
-            print("⚠️ No serverContent in message, keys: \(json.keys.joined(separator: ", "))")
+        // Handle toolCall
+        if json["toolCall"] != nil {
+            print("🔧 Received tool call (not yet implemented)")
             return
         }
 
+        // Handle serverContent
+        guard let serverContent = json["serverContent"] as? [String: Any] else {
+            print("⚠️ Unhandled message type, keys: \(json.keys.joined(separator: ", "))")
+            return
+        }
+
+        // Handle interruption
+        if let interrupted = serverContent["interrupted"] as? Bool, interrupted {
+            print("⚠️ Model was interrupted")
+            return
+        }
+
+        // Handle model turn with response
         if let modelTurn = serverContent["modelTurn"] as? [String: Any],
            let parts = modelTurn["parts"] as? [[String: Any]] {
             print("✅ Received model turn with \(parts.count) parts")
@@ -268,6 +296,11 @@ final class GeminiLiveClient: NSObject {
                     playAudio(data: audioData, sampleRate: Double(sampleRate))
                 }
             }
+        }
+
+        // Handle turnComplete
+        if serverContent["turnComplete"] != nil {
+            print("✅ Turn complete")
         }
     }
 
