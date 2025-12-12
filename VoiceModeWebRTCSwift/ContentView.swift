@@ -15,8 +15,9 @@ struct ContentView: View {
     
     // AppStorage properties
     @AppStorage("apiKey") private var apiKey = API_KEY
-    @AppStorage("humeApiKey") private var humeApiKey = ""
-    @AppStorage("humeSecretKey") private var humeSecretKey = ""
+    @AppStorage("geminiApiKey") private var geminiApiKey = ""
+    @AppStorage("geminiModel") private var geminiModel = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+    @AppStorage("geminiLiveEndpoint") private var geminiLiveEndpoint = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService/BidiGenerateContent"
     @AppStorage("customMcpEnabled") private var customMcpEnabled = true
     @AppStorage("customMcpServerUrl") private var customMcpServerUrl = ""
     @AppStorage("customMcpServerLabel") private var customMcpServerLabel = "bluebubbles"
@@ -256,8 +257,9 @@ struct ContentView: View {
         .sheet(isPresented: $showOptionsSheet) {
             OptionsView(
                 apiKey: $apiKey,
-                humeApiKey: $humeApiKey,
-                humeSecretKey: $humeSecretKey,
+                geminiApiKey: $geminiApiKey,
+                geminiModel: $geminiModel,
+                geminiLiveEndpoint: $geminiLiveEndpoint,
                 systemMessage: $systemMessage,
                 selectedModel: $selectedModel,
                 selectedVoice: $selectedVoice,
@@ -274,12 +276,13 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .startConversation)) { _ in
             webrtcManager.startConnection(
                 apiKey: apiKey,
-                humeApiKey: humeApiKey,
-                humeSecretKey: humeSecretKey,
                 provider: selectedProvider,
                 modelName: selectedModel,
                 systemMessage: systemMessage,
-                voice: selectedVoice
+                voice: selectedVoice,
+                geminiApiKey: geminiApiKey,
+                geminiModel: geminiModel,
+                geminiLiveEndpoint: geminiLiveEndpoint
             )
         }
     }
@@ -298,7 +301,9 @@ struct ContentView: View {
         // Request contacts permission
         webrtcManager.requestContactsPermission()
         
-        if apiKey.isEmpty {
+        if selectedProvider == .openAI, apiKey.isEmpty {
+            showOptionsSheet = true
+        } else if selectedProvider == .gemini, geminiApiKey.isEmpty {
             showOptionsSheet = true
         }
     }
@@ -374,12 +379,13 @@ struct ContentView: View {
                             
                             webrtcManager.startConnection(
                                 apiKey: apiKey,
-                                humeApiKey: humeApiKey,
-                                humeSecretKey: humeSecretKey,
                                 provider: selectedProvider,
                                 modelName: selectedModel,
                                 systemMessage: systemMessage,
-                                voice: selectedVoice
+                                voice: selectedVoice,
+                                geminiApiKey: geminiApiKey,
+                                geminiModel: geminiModel,
+                                geminiLiveEndpoint: geminiLiveEndpoint
                             )
                         } else {
                             // For non-realtime models, show a message that they're not supported yet
@@ -595,8 +601,9 @@ struct ContentView: View {
 
 struct OptionsView: View {
     @Binding var apiKey: String
-    @Binding var humeApiKey: String
-    @Binding var humeSecretKey: String
+    @Binding var geminiApiKey: String
+    @Binding var geminiModel: String
+    @Binding var geminiLiveEndpoint: String
     @Binding var systemMessage: String
     @Binding var selectedModel: String
     @Binding var selectedVoice: String
@@ -634,20 +641,23 @@ struct OptionsView: View {
                     .pickerStyle(.segmented)
                 }
                 
-                if selectedProviderRaw == WebRTCManager.VoiceProvider.hume.rawValue {
-                   Section(header: Text("Hume AI Configuration")) {
-                       TextField("Enter Hume API Key", text: $humeApiKey)
-                           .autocapitalization(.none)
-                       
-                       SecureField("Enter Hume Secret Key", text: $humeSecretKey)
-                           .autocapitalization(.none)
-                       
-                       Text("The Secret Key is used to generate a secure access token.")
-                           .font(.caption)
-                           .foregroundColor(.secondary)
-                   }
+                if selectedProviderRaw == WebRTCManager.VoiceProvider.gemini.rawValue {
+                    Section(header: Text("Gemini Configuration")) {
+                        SecureField("Enter Gemini API Key", text: $geminiApiKey)
+                            .autocapitalization(.none)
+
+                        TextField("Model (e.g. models/gemini-2.5-flash-native-audio-preview-12-2025)", text: $geminiModel)
+                            .autocapitalization(.none)
+
+                        TextField("Live WebSocket URL", text: $geminiLiveEndpoint)
+                            .autocapitalization(.none)
+
+                        Text("Note: Gemini Native Audio wiring is in progress. OpenAI Realtime remains the only fully-supported provider in this build.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
-                
+
                 if selectedProviderRaw == WebRTCManager.VoiceProvider.openAI.rawValue {
                     Section(header: Text("OpenAI API Key")) {
                         TextField("Enter OpenAI API Key", text: $apiKey)

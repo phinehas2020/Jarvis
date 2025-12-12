@@ -88,17 +88,17 @@ class WebRTCManager: NSObject, ObservableObject {
     // Voice Provider Configuration
     enum VoiceProvider: String, CaseIterable, Identifiable {
         case openAI = "OpenAI Realtime"
-        case hume = "Hume AI (EVI)"
+        case gemini = "Gemini Native Audio"
         
         var id: String { self.rawValue }
     }
     
     @Published var currentProvider: VoiceProvider = .openAI
-    private var humeApiKey: String = ""
-    private var humeSecretKey: String = ""
-    // Error Handling
 
-    
+    // Error Handling
+    @Published var errorMessage: String? = nil
+
+    private var geminiClient: GeminiLiveClient?
 
     // Private tool definitions helper
     private func getLocalTools() -> [[String: Any]] {
@@ -3244,57 +3244,73 @@ class WebRTCManager: NSObject, ObservableObject {
     /// Start a WebRTC connection using a standard API key for local testing.
     func startConnection(
         apiKey: String,
-        humeApiKey: String? = nil,
-        humeSecretKey: String? = nil,
         provider: VoiceProvider = .openAI,
         modelName: String,
         systemMessage: String,
-        voice: String
+        voice: String,
+        geminiApiKey: String? = nil,
+        geminiModel: String? = nil,
+        geminiLiveEndpoint: String? = nil
     ) {
         self.currentProvider = provider
-        if let hKey = humeApiKey {
-            self.humeApiKey = hKey
-        }
-        if let sKey = humeSecretKey {
-            self.humeSecretKey = sKey
-        }
         
         conversation.removeAll()
         conversationMap.removeAll()
         
-        if provider == .hume {
-            print("🚀 Starting Hume AI connection...")
-            
-            // Validate credentials
-            guard !self.humeApiKey.isEmpty, !self.humeSecretKey.isEmpty else {
-                print("❌ Hume API Key or Secret Key missing")
+        if provider == .gemini {
+            let resolvedApiKey = (geminiApiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedModel = (geminiModel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedEndpoint = (geminiLiveEndpoint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !resolvedApiKey.isEmpty else {
+                let errorItem = ConversationItem(
+                    id: UUID().uuidString,
+                    role: "system",
+                    text: "Error: Gemini API key is required."
+                )
                 DispatchQueue.main.async {
-                    let errorItem = ConversationItem(
-                        id: UUID().uuidString,
-                        role: "system",
-                        text: "Error: Hume API Key and Secret Key are required."
-                    )
                     self.conversation.append(errorItem)
                     self.connectionStatus = .disconnected
                 }
                 return
             }
-            
-            // Initialize and connect HumeClient
-            self.humeSession = HumeClient(apiKey: self.humeApiKey, secretKey: self.humeSecretKey)
-            self.humeSession?.delegate = self
-            self.connectionStatus = .connecting
-            
-            // Generate tool definitions to pass to Hume
-            var tools: [[String: Any]] = []
-            
-            // 1. Local Tools
-            tools.append(contentsOf: getLocalTools())
-            
-            // 2. MCP Tools
-            tools.append(contentsOf: mcpTools)
-            
-            self.humeSession?.connect(tools: tools)
+
+            guard !resolvedModel.isEmpty else {
+                let errorItem = ConversationItem(
+                    id: UUID().uuidString,
+                    role: "system",
+                    text: "Error: Gemini model is required (e.g. models/gemini-2.5-flash-native-audio-preview-12-2025)."
+                )
+                DispatchQueue.main.async {
+                    self.conversation.append(errorItem)
+                    self.connectionStatus = .disconnected
+                }
+                return
+            }
+
+            peerConnection?.close()
+            peerConnection = nil
+            dataChannel = nil
+            audioTrack = nil
+            videoTrack = nil
+
+            self.currentApiKey = apiKey
+
+            geminiClient?.disconnect()
+            let client: GeminiLiveClient
+            if resolvedEndpoint.isEmpty {
+                client = GeminiLiveClient(apiKey: resolvedApiKey, model: resolvedModel, systemPrompt: systemMessage)
+            } else {
+                client = GeminiLiveClient(apiKey: resolvedApiKey, model: resolvedModel, systemPrompt: systemMessage, endpointUrlString: resolvedEndpoint)
+            }
+            client.delegate = self
+            geminiClient = client
+
+            DispatchQueue.main.async {
+                self.connectionStatus = .connecting
+            }
+
+            client.connect()
             return
         }
         
@@ -3378,10 +3394,9 @@ class WebRTCManager: NSObject, ObservableObject {
         dataChannel = nil
         audioTrack = nil
         videoTrack = nil
-        
-        // Stop Hume connection
-        humeClient?.disconnect()
-        humeClient = nil
+
+        geminiClient?.disconnect()
+        geminiClient = nil
         
         connectionStatus = .disconnected
         currentApiKey = ""
@@ -3392,8 +3407,21 @@ class WebRTCManager: NSObject, ObservableObject {
     
     /// Sends a custom "conversation.item.create" event
     func sendMessage() {
-        guard let dc = dataChannel,
-              !outgoingMessage.trimmingCharacters(in: .whitespaces).isEmpty else {
+        let trimmed = outgoingMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if currentProvider == .gemini {
+            let item = ConversationItem(id: UUID().uuidString, role: "user", text: trimmed)
+            DispatchQueue.main.async {
+                self.conversation.append(item)
+                self.conversationMap[item.id] = item
+                self.outgoingMessage = ""
+            }
+            geminiClient?.sendText(trimmed)
+            return
+        }
+
+        guard let dc = dataChannel else {
             return
         }
         
@@ -3405,7 +3433,7 @@ class WebRTCManager: NSObject, ObservableObject {
                 "content": [
                     [
                         "type": "input_text",
-                        "text": outgoingMessage
+                        "text": trimmed
                     ]
                 ]
             ]
@@ -4028,198 +4056,32 @@ extension WebRTCManager: RTCPeerConnectionDelegate {
     }
 }
 
-// MARK: - HumeClientDelegate
-extension WebRTCManager: HumeClientDelegate {
-    func humeClient(_ client: HumeClient, didChangeStatus status: ConnectionStatus) {
+// MARK: - GeminiLiveClientDelegate
+extension WebRTCManager: GeminiLiveClientDelegate {
+    func geminiLiveClient(_ client: GeminiLiveClient, didChangeStatus status: ConnectionStatus) {
         DispatchQueue.main.async {
             self.connectionStatus = status
         }
     }
-    
-    func humeClient(_ client: HumeClient, didReceiveMessage message: ConversationItem) {
+
+    func geminiLiveClient(_ client: GeminiLiveClient, didReceiveMessage message: ConversationItem) {
         DispatchQueue.main.async {
             self.conversation.append(message)
             self.conversationMap[message.id] = message
         }
     }
-    
-    func humeClient(_ client: HumeClient, didEncounterError error: Error) {
-        print("❌ Hume Client Error: \(error.localizedDescription)")
+
+    func geminiLiveClient(_ client: GeminiLiveClient, didEncounterError error: Error) {
+        print("❌ Gemini Live Error: \(error.localizedDescription)")
         DispatchQueue.main.async {
             self.errorMessage = error.localizedDescription
             let errorItem = ConversationItem(
                 id: UUID().uuidString,
                 role: "system",
-                text: "Hume Error: \(error.localizedDescription)"
+                text: "Gemini Error: \(error.localizedDescription)"
             )
             self.conversation.append(errorItem)
             self.connectionStatus = .disconnected
-        }
-    }
-    
-    func humeClient(_ client: HumeClient, didRequestTool toolName: String, arguments: String, callId: String) {
-        print("🔧 Executing Hume Tool: \(toolName) with args: \(arguments)")
-        
-        // Reuse the existing tool execution logic?
-        // We need to parse arguments and execute.
-        // Since the existing logic is tied to DataChannel messages, we'll replicate the routing here for now or refactor.
-        // For speed, let's just route manually to the known functions.
-        
-        Task {
-            var result: String = "Error: Unknown tool or invalid arguments"
-            
-            // Parse arguments
-            let argsDict = (try? JSONSerialization.jsonObject(with: arguments.data(using: .utf8) ?? Data()) as? [String: Any]) ?? [:]
-            
-            // Check Local Tools
-            if localToolNames.contains(toolName) {
-                // Route to local function
-                switch toolName {
-                case "search_contacts":
-                    if let query = argsDict["query"] as? String {
-                        result = await searchContacts(query: query)
-                    }
-                case "create_calendar_event":
-                   if let title = argsDict["title"] as? String,
-                      let startTime = argsDict["start_time"] as? String,
-                      let endTime = argsDict["end_time"] as? String {
-                       result = await createCalendarEvent(title: title, startTime: startTime, endTime: endTime)
-                   }
-                case "delete_calendar_event":
-                    if let eventId = argsDict["event_id"] as? String {
-                        result = await deleteCalendarEvent(eventId: eventId)
-                    }
-                case "edit_calendar_event":
-                    if let eventId = argsDict["event_id"] as? String {
-                        result = await editCalendarEvent(eventId: eventId, newTitle: argsDict["new_title"] as? String, newStartTime: argsDict["new_start_time"] as? String, newEndTime: argsDict["new_end_time"] as? String)
-                    }
-                case "find_calendar_events":
-                    result = await findCalendarEvents(title: argsDict["title"] as? String, startDate: argsDict["start_date"] as? String, endDate: argsDict["end_date"] as? String)
-                case "create_reminder":
-                    if let title = argsDict["title"] as? String {
-                        result = await createReminder(title: title, dueDate: argsDict["due_date"] as? String, notes: argsDict["notes"] as? String)
-                    }
-                case "delete_reminder":
-                    if let reminderId = argsDict["reminder_id"] as? String {
-                        result = await deleteReminder(reminderId: reminderId)
-                    }
-                case "edit_reminder":
-                    if let reminderId = argsDict["reminder_id"] as? String {
-                        result = await editReminder(reminderId: reminderId, newTitle: argsDict["new_title"] as? String, newDueDate: argsDict["new_due_date"] as? String, newNotes: argsDict["new_notes"] as? String)
-                    }
-                case "find_reminders":
-                    result = await findReminders(title: argsDict["title"] as? String, dueDate: argsDict["due_date"] as? String, completed: argsDict["completed"] as? Bool)
-                case "get_device_info":
-                    result = getDeviceInfo()
-                case "get_battery_info":
-                    result = getBatteryInfo()
-                case "get_storage_info":
-                    result = getStorageInfo()
-                case "get_network_info":
-                    result = getNetworkInfo()
-                case "set_brightness":
-                    if let brightness = argsDict["brightness"] as? Double {
-                        result = setBrightness(brightness: brightness)
-                    }
-                case "set_volume":
-                    if let volume = argsDict["volume"] as? Double {
-                        result = setVolume(volume: volume)
-                    }
-                case "trigger_haptic":
-                    if let style = argsDict["style"] as? String {
-                        result = triggerHaptic(style: style)
-                    }
-                case "take_screenshot":
-                    result = await takeScreenshot()
-                case "get_music_info":
-                    result = await getMusicInfo()
-                case "control_music":
-                    if let action = argsDict["action"] as? String {
-                        result = await controlMusic(action: action)
-                    }
-                case "search_and_play_music":
-                    if let query = argsDict["query"] as? String {
-                        result = await searchAndPlayMusic(query: query, searchType: argsDict["search_type"] as? String)
-                    }
-                case "get_playlists":
-                    result = await getPlaylists()
-                case "play_playlist":
-                    if let name = argsDict["name"] as? String {
-                        result = await playPlaylist(name: name)
-                    }
-                case "toggle_shuffle":
-                    result = await toggleShuffle()
-                case "toggle_repeat":
-                    result = await toggleRepeat()
-                case "end_call":
-                    result = endCall()
-                case "delegate_to_gpt4o":
-                    if let prompt = argsDict["prompt"] as? String {
-                        let system = argsDict["system"] as? String
-                        let model = argsDict["model"] as? String
-                        let maxOutputTokens = argsDict["max_output_tokens"] as? Int
-                        result = await performDelegatedTextCompletion(apiKey: currentApiKey, prompt: prompt, system: system, model: model, maxOutputTokens: maxOutputTokens)
-                    }
-                case "toggle_wifi":
-                    if let enabled = argsDict["enabled"] as? Bool {
-                        result = toggleWiFi(enabled: enabled)
-                    }
-                case "toggle_bluetooth":
-                    if let enabled = argsDict["enabled"] as? Bool {
-                        result = toggleBluetooth(enabled: enabled)
-                    }
-                case "set_do_not_disturb":
-                    if let enabled = argsDict["enabled"] as? Bool {
-                        result = setDoNotDisturb(enabled: enabled)
-                    }
-                case "set_alarm":
-                    if let time = argsDict["time"] as? String {
-                        result = setAlarm(time: time, label: argsDict["label"] as? String)
-                    }
-                case "get_alarms":
-                    result = getAlarms()
-                case "take_photo":
-                    result = await takePhoto()
-                case "get_recent_photos":
-                    let count = argsDict["count"] as? Int ?? 10
-                    result = await getRecentPhotos(count: count)
-                case "get_current_location":
-                    result = await getCurrentLocation()
-                case "get_weather":
-                    result = await getWeather()
-                case "create_note":
-                    if let title = argsDict["title"] as? String, let content = argsDict["content"] as? String {
-                        result = createNote(title: title, content: content)
-                    }
-                case "search_notes":
-                    if let query = argsDict["query"] as? String {
-                        result = searchNotes(query: query)
-                    }
-                case "edit_note":
-                    if let noteId = argsDict["note_id"] as? String, let newContent = argsDict["new_content"] as? String {
-                        result = editNote(noteId: noteId, newContent: newContent)
-                    }
-                case "delete_note":
-                    if let noteId = argsDict["note_id"] as? String {
-                        result = deleteNote(noteId: noteId)
-                    }
-                case "get_all_notes":
-                    result = getAllNotes()
-                case "run_shortcut":
-                    if let name = argsDict["name"] as? String {
-                        result = await runShortcut(name: name)
-                    }
-                default:
-                    print("⚠️ Hume requested unknown local tool: \(toolName)")
-                    result = "Error: Unknown local tool '\(toolName)'"
-                }
-            } else {
-                // MCP Tool
-                result = await performMcpToolCall(name: toolName, arguments: argsDict)
-            }
-            
-            // Send result back to Hume
-            client.sendToolOutput(callId: callId, output: result)
         }
     }
 }
