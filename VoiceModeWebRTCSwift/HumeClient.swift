@@ -138,7 +138,7 @@ class HumeClient: NSObject {
             "type": "session_settings",
             "audio": [
                 "encoding": "linear16",
-                "sample_rate": 44100, // We will request 44.1kHz from engine
+                "sample_rate": 48000, // Matching higher quality default
                 "channels": 1
             ],
             "context": [
@@ -269,10 +269,10 @@ class HumeClient: NSObject {
         audioEngine.attach(playerNode)
         
         // Default output format (usually 44.1kHz or 48kHz Stereo)
-        // We MUST connect the player node with the format we intend to play (24kHz Mono)
-        // so the engine can upmix it to the output format.
+        // We MUST connect the player node with the format we intend to play.
+        // Since audio sounded slow/deep at 24kHz setting, the data is likely 48kHz.
         
-        let humeFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: false)
+        let humeFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48000, channels: 1, interleaved: false)
         // SAFEST APPROACH: Connect to mainMixerNode, not outputNode directly. 
         // The mixer handles resampling and channel mixing automatically.
         audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: humeFormat)
@@ -331,8 +331,8 @@ class HumeClient: NSObject {
         // AVAudioPlayerNode will crash if we schedule a buffer with channel count != output format channel count IF it is not connected properly.
         // However, usually AVAudioEngine handles mixing if connected with the right format.
         
-        // Let's stick to declaring the data format as 24kHz Mono Int16, which is standard for EVI.
-        guard let pcmFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: false) else { return }
+        // Let's stick to declaring the data format as 48kHz Mono Int16.
+        guard let pcmFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48000, channels: 1, interleaved: false) else { return }
         
         if let buffer = data.toPCMBuffer(format: pcmFormat) {
             // Check if we need to connect the player node with this specific format first
