@@ -96,17 +96,13 @@ class WebRTCManager: NSObject, ObservableObject {
     @Published var currentProvider: VoiceProvider = .openAI
     private var humeApiKey: String = ""
     private var humeSecretKey: String = ""
-    @Published var currentProvider: VoiceProvider = .openAI
-    private var humeApiKey: String = ""
-    private var humeSecretKey: String = ""
-    private var humeClient: HumeClient?
-    
     // Error Handling
     @Published var errorMessage: String?
     
-    // MCP Client
-    private let mcpClient = MCPClient() // Assuming you have an MCPClient class
+    // Private tool definitions helper
+    @Published var errorMessage: String?
     
+
     // Private tool definitions helper
     private func getLocalTools() -> [[String: Any]] {
         return [
@@ -4222,11 +4218,7 @@ extension WebRTCManager: HumeClientDelegate {
                 }
             } else {
                 // MCP Tool
-                do {
-                    result = try await mcpClient.callTool(name: toolName, arguments: argsDict)
-                } catch {
-                    result = "Error executing MCP tool: \(error.localizedDescription)"
-                }
+                result = await performMcpToolCall(name: toolName, arguments: argsDict)
             }
             
             // Send result back to Hume
