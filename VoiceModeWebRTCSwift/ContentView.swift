@@ -256,6 +256,7 @@ struct ContentView: View {
             OptionsView(
                 apiKey: $apiKey,
                 humeApiKey: $humeApiKey,
+                humeSecretKey: $humeSecretKey,
                 systemMessage: $systemMessage,
                 selectedModel: $selectedModel,
                 selectedVoice: $selectedVoice,
@@ -273,6 +274,7 @@ struct ContentView: View {
             webrtcManager.startConnection(
                 apiKey: apiKey,
                 humeApiKey: humeApiKey,
+                humeSecretKey: humeSecretKey,
                 provider: selectedProvider,
                 modelName: selectedModel,
                 systemMessage: systemMessage,
@@ -372,6 +374,7 @@ struct ContentView: View {
                             webrtcManager.startConnection(
                                 apiKey: apiKey,
                                 humeApiKey: humeApiKey,
+                                humeSecretKey: humeSecretKey,
                                 provider: selectedProvider,
                                 modelName: selectedModel,
                                 systemMessage: systemMessage,
