@@ -570,7 +570,7 @@ extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         guard session === urlSession, webSocketTask === self.webSocketTask else { return }
 
-        print("✅ Gemini Live WebSocket opened successfully (protocol: \(protocol ?? "none"))")
+        print("✅ Gemini Live WebSocket opened successfully (protocol: \(`protocol` ?? "none"))")
         isConnected = true
         delegate?.geminiLiveClient(self, didChangeStatus: .connected)
 
