@@ -286,9 +286,13 @@ class HumeClient: NSObject {
 extension AVAudioPCMBuffer {
     func toData() -> Data {
         let channelCount = 1  // force mono for upload
-        let channels = UnsafeBufferPointer(start: self.int16ChannelData, count: channelCount)
-        let ch0Data = NSData(bytes: channels[0], length:Int(self.frameCapacity * self.format.streamDescription.pointee.mBytesPerFrame))
-        return ch0Data as Data
+        guard let int16ChannelData = self.int16ChannelData else { return Data() }
+        let channels = UnsafeBufferPointer(start: int16ChannelData, count: channelCount)
+        if let channelData = channels.first {
+            let data = NSData(bytes: channelData, length: Int(self.frameCapacity * 2)) // 2 bytes per sample for Int16
+            return data as Data
+        }
+        return Data()
     }
 }
 
