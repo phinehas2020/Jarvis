@@ -408,10 +408,19 @@ final class GeminiLiveClient: NSObject {
     private func processAudioInput(buffer: AVAudioPCMBuffer) {
         guard isConnected else { return }
 
+        // Apply digital gain (25x) because input is extremely low (RMS ~0.0003)
+        // This brings levels up to ~0.01-0.1 range
+        if let floatData = buffer.floatChannelData?[0] {
+            let frames = Int(buffer.frameLength)
+            for i in 0..<frames {
+                floatData[i] = min(1.0, max(-1.0, floatData[i] * 25.0))
+            }
+        }
+
         // Debug RMS levels occasionally
         if audioChunkCounter % 100 == 0 {
             let rms = listAudioLevels(buffer)
-            print("🎤 Audio Input RMS: \(rms)")
+            print("🎤 Audio Input RMS: \(rms) (boosted)")
         }
 
         if let playerNode, playerNode.isPlaying {
@@ -675,11 +684,6 @@ extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate 
             guard let self = self, self.isConnected else { return }
             self.sendSetup()
             self.startAudio()
-            
-            // Send an initial greeting to verify bidirectional communication
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
-                self.sendText("Hello")
-            }
         }
     }
     
