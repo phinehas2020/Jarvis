@@ -144,9 +144,10 @@ final class GeminiLiveClient: NSObject {
         guard isConnected else { return }
 
         // Start with minimal setup - just model and config
+        let modelName = model.hasPrefix("models/") ? model : "models/\(model)"
         let message: [String: Any] = [
             "setup": [
-                "model": model
+                "model": modelName
             ]
         ]
 
@@ -634,14 +635,27 @@ extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate 
         delegate?.geminiLiveClient(self, didChangeStatus: .connected)
 
         receiveMessage()
-        sendSetup()
-        startAudio()
+        
+        // Add a small delay before sending setup to ensure socket is ready for writes
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self, self.isConnected else { return }
+            self.sendSetup()
+            self.startAudio()
+        }
     }
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         guard session === urlSession, webSocketTask === self.webSocketTask else { return }
         let reasonString = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "no reason"
         print("🔌 Gemini Live WebSocket closed: code=\(closeCode.rawValue), reason=\(reasonString)")
+        
+        // If we haven't successfully established a session (or just connected and closed), try next candidate
+        if !remainingEndpointCandidates.isEmpty {
+             print("⚠️ WebSocket closed, trying next endpoint candidate...")
+             connectNextEndpoint()
+             return
+        }
+        
         teardownConnection(notify: true)
     }
 
@@ -656,22 +670,32 @@ extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate 
         guard let error else { return }
 
         if let response = task.response as? HTTPURLResponse {
-            if response.statusCode == 404, !remainingEndpointCandidates.isEmpty {
-                print("⚠️ Got 404, trying next endpoint candidate")
+            print("❌ Gemini Live handshake HTTP \(response.statusCode) headers: \(response.allHeaderFields)")
+            
+            if !remainingEndpointCandidates.isEmpty {
+                print("⚠️ HTTP \(response.statusCode), trying next endpoint candidate...")
                 connectNextEndpoint()
                 return
             }
+            
             if response.statusCode == 404 {
                 let endpoint = currentEndpointAttempt ?? "unknown endpoint"
                 probeHttpError(for: endpoint)
             }
-            print("❌ Gemini Live handshake HTTP \(response.statusCode) headers: \(response.allHeaderFields)")
+            
             let endpoint = currentEndpointAttempt ?? "unknown endpoint"
             let message = "Gemini Live WebSocket handshake failed (HTTP \(response.statusCode)) for \(endpoint)."
             let wrapped = NSError(domain: "GeminiLiveClient", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: message])
             delegate?.geminiLiveClient(self, didEncounterError: wrapped)
         } else {
             print("❌ Gemini Live WebSocket error: \(error.localizedDescription)")
+            
+            if !remainingEndpointCandidates.isEmpty {
+                print("⚠️ Connection error, trying next endpoint candidate...")
+                connectNextEndpoint()
+                return
+            }
+            
             delegate?.geminiLiveClient(self, didEncounterError: error)
         }
 
