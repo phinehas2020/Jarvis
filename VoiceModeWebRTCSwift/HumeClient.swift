@@ -293,6 +293,12 @@ class HumeClient: NSObject {
     private func processAudioInput(buffer: AVAudioPCMBuffer) {
         guard isConnected, let webSocketTask = webSocketTask else { return }
         
+        // Anti-Echo Gate: Do not send audio if the AI is currently speaking.
+        // This prevents the AI from hearing itself and interrupting itself.
+        if let player = playerNode, player.isPlaying {
+            return
+        }
+        
         // Convert Float32 buffer (standard iOS mic) to Int16 for Hume
         guard let pcmBuffer = convertToPCMInt16(buffer: buffer) else { return }
         
@@ -300,9 +306,9 @@ class HumeClient: NSObject {
         let base64 = audioData.base64EncodedString()
         
         // Debug: print audio packet size periodically (e.g. random sample) to confirm data flow
-        if Int.random(in: 0...50) == 0 {
-            print("🎤 Sending audio packet: \(audioData.count) bytes")
-        }
+        // if Int.random(in: 0...50) == 0 {
+        //    print("🎤 Sending audio packet: \(audioData.count) bytes")
+        // }
         
         let message: [String: Any] = [
             "type": "audio_input",
@@ -314,7 +320,7 @@ class HumeClient: NSObject {
             let wsMessage = URLSessionWebSocketTask.Message.string(jsonString)
             webSocketTask.send(wsMessage) { error in
                 if let error = error {
-                    print("❌ Failed to send audio: \(error)")
+                    // print("❌ Failed to send audio: \(error)")
                 }
             }
         }
