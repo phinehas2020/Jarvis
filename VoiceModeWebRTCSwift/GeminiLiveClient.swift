@@ -204,20 +204,28 @@ final class GeminiLiveClient: NSObject {
         }
     }
 
+    private var messageCounter = 0
+    
     private func receiveMessage() {
         webSocketTask?.receive { [weak self] result in
             guard let self else { return }
 
             switch result {
             case .success(let message):
+                self.messageCounter += 1
                 switch message {
                 case .string(let text):
+                    print("📨 Message #\(self.messageCounter) received (\(text.count) chars)")
                     self.handleMessage(text)
                 case .data(let data):
+                    print("📨 Message #\(self.messageCounter) received (\(data.count) bytes as data)")
                     if let text = String(data: data, encoding: .utf8) {
                         self.handleMessage(text)
+                    } else {
+                        print("⚠️ Could not decode data as UTF-8")
                     }
                 @unknown default:
+                    print("⚠️ Unknown message type")
                     break
                 }
 
@@ -226,6 +234,7 @@ final class GeminiLiveClient: NSObject {
                 }
 
             case .failure(let error):
+                print("❌ WebSocket receive error: \(error.localizedDescription)")
                 self.delegate?.geminiLiveClient(self, didEncounterError: error)
                 self.disconnect()
             }
