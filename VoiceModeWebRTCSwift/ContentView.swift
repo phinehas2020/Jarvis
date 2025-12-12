@@ -455,9 +455,11 @@ struct ContentView: View {
                                 .font(.system(size: 14))
                             Text("Video")
                                 .font(.system(size: 8))
-                .accessibilityLabel(currentModelSupportsVision ? (webrtcManager.isVideoEnabled ? "Disable video" : "Enable video") : "Video not supported by this model")
-                    
-                    // Camera on/off button (only when video is enabled and vision is supported)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel(currentModelSupportsVision ? (webrtcManager.isVideoEnabled ? "Disable video" : "Enable video") : "Video not supported by this model")
                     if webrtcManager.isVideoEnabled && currentModelSupportsVision {
                         Button(action: {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
