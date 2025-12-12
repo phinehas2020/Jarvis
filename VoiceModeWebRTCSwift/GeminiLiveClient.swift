@@ -143,28 +143,15 @@ final class GeminiLiveClient: NSObject {
     private func sendSetup() {
         guard isConnected else { return }
 
+        // Start with minimal setup - just model and config
         let message: [String: Any] = [
             "setup": [
-                "model": model,
-                "generationConfig": [
-                    "responseModalities": ["AUDIO"]
-                ],
-                "speechConfig": [
-                    "voiceConfig": [
-                        "prebuiltVoiceConfig": [
-                            "voiceName": "Puck"
-                        ]
-                    ]
-                ],
-                "systemInstruction": [
-                    "parts": [
-                        ["text": systemPrompt]
-                    ]
-                ]
+                "model": model
             ]
         ]
 
-        print("📤 Sending setup message for model: \(model)")
+        print("📤 Sending minimal setup message for model: \(model)")
+        print("📤 Setup JSON: \(String(data: try! JSONSerialization.data(withJSONObject: message), encoding: .utf8) ?? "error")")
         sendJSON(message)
     }
 
