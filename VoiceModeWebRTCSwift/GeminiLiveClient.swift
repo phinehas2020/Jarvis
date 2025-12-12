@@ -157,6 +157,7 @@ final class GeminiLiveClient: NSObject {
             ]
         ]
 
+        print("📤 Sending setup message for model: \(model)")
         sendJSON(message)
     }
 
@@ -225,13 +226,17 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func handleMessage(_ text: String) {
+        print("📥 Received Gemini Live message: \(text.prefix(200))...")
+        
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            print("⚠️ Failed to parse message JSON")
             return
         }
 
         if let error = json["error"] as? [String: Any] {
             let message = (error["message"] as? String) ?? "Gemini Live error"
+            print("❌ Gemini Live error: \(message)")
             delegate?.geminiLiveClient(
                 self,
                 didEncounterError: NSError(domain: "GeminiLiveClient", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
@@ -240,13 +245,16 @@ final class GeminiLiveClient: NSObject {
         }
 
         guard let serverContent = json["serverContent"] as? [String: Any] else {
+            print("⚠️ No serverContent in message, keys: \(json.keys.joined(separator: ", "))")
             return
         }
 
         if let modelTurn = serverContent["modelTurn"] as? [String: Any],
            let parts = modelTurn["parts"] as? [[String: Any]] {
+            print("✅ Received model turn with \(parts.count) parts")
             for part in parts {
                 if let text = part["text"] as? String, !text.isEmpty {
+                    print("💬 Received text: \(text)")
                     let item = ConversationItem(id: UUID().uuidString, role: "assistant", text: text)
                     delegate?.geminiLiveClient(self, didReceiveMessage: item)
                 }
@@ -255,6 +263,7 @@ final class GeminiLiveClient: NSObject {
                    let mimeType = inlineData["mimeType"] as? String,
                    let base64 = inlineData["data"] as? String,
                    let audioData = Data(base64Encoded: base64) {
+                    print("🔊 Received audio: \(audioData.count) bytes, mimeType: \(mimeType)")
                     let sampleRate = parseSampleRate(from: mimeType) ?? 24000
                     playAudio(data: audioData, sampleRate: Double(sampleRate))
                 }
@@ -561,6 +570,7 @@ extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         guard session === urlSession, webSocketTask === self.webSocketTask else { return }
 
+        print("✅ Gemini Live WebSocket opened successfully (protocol: \(protocol ?? "none"))")
         isConnected = true
         delegate?.geminiLiveClient(self, didChangeStatus: .connected)
 
@@ -571,15 +581,24 @@ extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate 
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         guard session === urlSession, webSocketTask === self.webSocketTask else { return }
+        let reasonString = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "no reason"
+        print("🔌 Gemini Live WebSocket closed: code=\(closeCode.rawValue), reason=\(reasonString)")
         teardownConnection(notify: true)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard session === urlSession, task === webSocketTask else { return }
+        
+        if error == nil {
+            print("✅ Gemini Live WebSocket task completed successfully")
+            return
+        }
+        
         guard let error else { return }
 
         if let response = task.response as? HTTPURLResponse {
             if response.statusCode == 404, !remainingEndpointCandidates.isEmpty {
+                print("⚠️ Got 404, trying next endpoint candidate")
                 connectNextEndpoint()
                 return
             }
@@ -593,6 +612,7 @@ extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate 
             let wrapped = NSError(domain: "GeminiLiveClient", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: message])
             delegate?.geminiLiveClient(self, didEncounterError: wrapped)
         } else {
+            print("❌ Gemini Live WebSocket error: \(error.localizedDescription)")
             delegate?.geminiLiveClient(self, didEncounterError: error)
         }
 
