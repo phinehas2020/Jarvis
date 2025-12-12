@@ -124,7 +124,10 @@ class HumeClient: NSObject {
         sendSessionSettings()
         
         // 2. Start audio capture only after connection is established
-        startAudio()
+        // 2. Start audio capture with a slight delay to ensure settings are processed
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.startAudio()
+        }
     }
     
     private func sendSessionSettings() {
@@ -270,7 +273,9 @@ class HumeClient: NSObject {
         // so the engine can upmix it to the output format.
         
         let humeFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: false)
-        audioEngine.connect(playerNode, to: audioEngine.outputNode, format: humeFormat)
+        // SAFEST APPROACH: Connect to mainMixerNode, not outputNode directly. 
+        // The mixer handles resampling and channel mixing automatically.
+        audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: humeFormat)
         
         do {
             try audioEngine.start()
