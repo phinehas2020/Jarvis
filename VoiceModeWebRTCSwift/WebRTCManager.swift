@@ -96,6 +96,7 @@ class WebRTCManager: NSObject, ObservableObject {
     @Published var currentProvider: VoiceProvider = .openAI
     private var humeApiKey: String = ""
     private var humeSecretKey: String = ""
+    private var humeClient: HumeClient?
     
     // WebRTC references
     private var peerConnection: RTCPeerConnection?
@@ -2868,16 +2869,28 @@ class WebRTCManager: NSObject, ObservableObject {
         
         if provider == .hume {
             print("🚀 Starting Hume AI connection...")
-            // Placeholder: Add a system message to the conversation
-            let systemItem = ConversationItem(
-                id: UUID().uuidString,
-                role: "system",
-                text: "Hume AI integration is currently a placeholder. Please check back later for full audio streaming support."
-            )
-            DispatchQueue.main.async {
-                self.conversation.append(systemItem)
+            
+            // Validate credentials
+            guard !self.humeApiKey.isEmpty, !self.humeSecretKey.isEmpty else {
+                print("❌ Hume API Key or Secret Key missing")
+                DispatchQueue.main.async {
+                    let errorItem = ConversationItem(
+                        id: UUID().uuidString,
+                        role: "system",
+                        text: "Error: Hume API Key and Secret Key are required."
+                    )
+                    self.conversation.append(errorItem)
+                    self.connectionStatus = .disconnected
+                }
+                return
             }
-             self.connectionStatus = .disconnected
+            
+            // Initialize and connect HumeClient
+            self.humeClient = HumeClient(apiKey: self.humeApiKey, secretKey: self.humeSecretKey)
+            self.humeClient?.delegate = self
+            self.connectionStatus = .connecting
+            self.humeClient?.connect()
+            
             return
         }
         
@@ -2955,11 +2968,17 @@ class WebRTCManager: NSObject, ObservableObject {
         isCameraOn = false
         isMicMuted = false
         
+        // Stop OpenAI connection
         peerConnection?.close()
         peerConnection = nil
         dataChannel = nil
         audioTrack = nil
         videoTrack = nil
+        
+        // Stop Hume connection
+        humeClient?.disconnect()
+        humeClient = nil
+        
         connectionStatus = .disconnected
         currentApiKey = ""
         awaitingToolResponse = false
@@ -4345,6 +4364,34 @@ extension WebRTCManager: RTCPeerConnectionDelegate {
     func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
         // If the server creates the data channel on its side, handle it here
         dataChannel.delegate = self
+    }
+}
+
+// MARK: - HumeClientDelegate
+extension WebRTCManager: HumeClientDelegate {
+    func humeClient(_ client: HumeClient, didChangeStatus status: ConnectionStatus) {
+        DispatchQueue.main.async {
+            self.connectionStatus = status
+        }
+    }
+    
+    func humeClient(_ client: HumeClient, didReceiveMessage message: ConversationItem) {
+        DispatchQueue.main.async {
+            self.conversation.append(message)
+        }
+    }
+    
+    func humeClient(_ client: HumeClient, didEncounterError error: Error) {
+        print("❌ Hume Client Error: \(error)")
+        DispatchQueue.main.async {
+            let errorItem = ConversationItem(
+                id: UUID().uuidString,
+                role: "system",
+                text: "Hume Error: \(error.localizedDescription)"
+            )
+            self.conversation.append(errorItem)
+            self.connectionStatus = .disconnected
+        }
     }
 }
 
