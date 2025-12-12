@@ -317,10 +317,20 @@ class HumeClient: NSObject {
         // Note: We need to know the format sent by Hume.
         // Usually EVI sends 24kHz or 48kHz mono PCM 16-bit.
         
-        // For simplicity, assuming 24kHz mono 16-bit (common EVI default):
-        guard let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: false) else { return }
+        // Use the format from the audio engine's output node to ensure compatibility
+        // But the data ITSELF is likely 24kHz mono. We must create a buffer that matches the DATA.
+        // Then we can let the engine mix it, or we converter it.
+        // AVAudioPlayerNode will crash if we schedule a buffer with channel count != output format channel count IF it is not connected properly.
+        // However, usually AVAudioEngine handles mixing if connected with the right format.
         
-        if let buffer = data.toPCMBuffer(format: format) {
+        // Let's stick to declaring the data format as 24kHz Mono Int16, which is standard for EVI.
+        guard let pcmFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: false) else { return }
+        
+        if let buffer = data.toPCMBuffer(format: pcmFormat) {
+            // Check if we need to connect the player node with this specific format first
+            // If the player node is already connected to the mixer (which might be stereo), 
+            // the engine *should* handle the upmix from mono to stereo automatically.
+            
             playerNode?.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
             if !(playerNode?.isPlaying ?? false) {
                 playerNode?.play()
