@@ -16,7 +16,7 @@ struct ContentView: View {
     // AppStorage properties
     @AppStorage("apiKey") private var apiKey = API_KEY
     @AppStorage("geminiApiKey") private var geminiApiKey = ""
-    @AppStorage("geminiModel") private var geminiModel = "gemini-2.0-flash-exp"
+    @AppStorage("geminiModel") private var geminiModel = "models/gemini-flash-latest"
     @AppStorage("geminiLiveEndpoint") private var geminiLiveEndpoint = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
     @AppStorage("customMcpEnabled") private var customMcpEnabled = true
     @AppStorage("customMcpServerUrl") private var customMcpServerUrl = ""
@@ -646,7 +646,7 @@ struct OptionsView: View {
                         SecureField("Enter Gemini API Key", text: $geminiApiKey)
                             .autocapitalization(.none)
 
-                        TextField("Model (e.g. gemini-2.0-flash-exp)", text: $geminiModel)
+                        TextField("Model (e.g. models/gemini-flash-latest)", text: $geminiModel)
                             .autocapitalization(.none)
 
                         TextField("Live WebSocket URL", text: $geminiLiveEndpoint)
