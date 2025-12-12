@@ -196,6 +196,8 @@ final class GeminiLiveClient: NSObject {
 
         audioChunkCounter += 1
         if audioChunkCounter % 100 == 0 {
+             // We can't calculate RMS from Data easily here efficiently without decoding, 
+             // but we will rely on the fact that we are sending data.
             print("🎤 Sent \(audioChunkCounter) audio chunks (\(pcm16Data.count) bytes @ \(sampleRate)Hz)")
         }
         
@@ -467,6 +469,11 @@ final class GeminiLiveClient: NSObject {
             return
         }
 
+        if audioChunkCounter % 100 == 0 {
+            let rms = listAudioLevels(buffer)
+            print("🎤 Audio Input RMS: \(rms)")
+        }
+
         // Fallback path without conversion
         guard let pcmData = pcm16Data(from: buffer) else {
             print("⚠️ Failed to get PCM data from buffer (frameLength: \(buffer.frameLength))")
@@ -658,11 +665,27 @@ extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate 
         receiveMessage()
         
         // Add a small delay before sending setup to ensure socket is ready for writes
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self = self, self.isConnected else { return }
             self.sendSetup()
             self.startAudio()
+            
+            // Send an initial greeting to verify bidirectional communication
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+                self.sendText("Hello")
+            }
         }
+    }
+    
+    // Helper to calculate RMS for debugging
+    private func listAudioLevels(_ buffer: AVAudioPCMBuffer) -> Float {
+        guard let channelData = buffer.floatChannelData?[0] else { return 0 }
+        let frameLength = Int(buffer.frameLength)
+        var sum: Float = 0
+        for i in 0..<frameLength {
+            sum += channelData[i] * channelData[i]
+        }
+        return sqrt(sum / Float(frameLength))
     }
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
