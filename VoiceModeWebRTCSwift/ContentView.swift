@@ -16,7 +16,7 @@ struct ContentView: View {
     // AppStorage properties
     @AppStorage("apiKey") private var apiKey = API_KEY
     @AppStorage("geminiApiKey") private var geminiApiKey = ""
-    @AppStorage("geminiModel") private var geminiModel = "models/gemini-2.0-flash-exp"
+    @AppStorage("geminiModel") private var geminiModel = "models/gemini-2.5-flash-native-audio-preview-12-2025"
     @AppStorage("geminiLiveEndpoint") private var geminiLiveEndpoint = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
     @AppStorage("customMcpEnabled") private var customMcpEnabled = true
     @AppStorage("customMcpServerUrl") private var customMcpServerUrl = ""
@@ -652,7 +652,7 @@ struct OptionsView: View {
                         TextField("Live WebSocket URL", text: $geminiLiveEndpoint)
                             .autocapitalization(.none)
 
-                        Text("Note: Gemini Native Audio wiring is in progress. OpenAI Realtime remains the only fully-supported provider in this build.")
+                        Text("Tip: Use a Gemini native-audio model. Jarvis sends a response after you stop speaking (~0.75s silence).")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

@@ -18,6 +18,8 @@ final class GeminiLiveClient: NSObject {
     private var urlSession: URLSession?
     private var webSocketTask: URLSessionWebSocketTask?
     private var isConnected: Bool = false
+    private var isReadyForAudio: Bool = false
+    private var isAwaitingModelResponse: Bool = false
     private var remainingEndpointCandidates: [String] = []
     private var currentEndpointAttempt: String?
 
@@ -25,6 +27,8 @@ final class GeminiLiveClient: NSObject {
     private var inputNode: AVAudioInputNode?
     private var playerNode: AVAudioPlayerNode?
     private var playbackFormat: AVAudioFormat?
+    private let playbackStateLock = NSLock()
+    private var pendingPlaybackBuffers: Int = 0
 
     private let desiredInputSampleRate: Double = 16000
     private var audioConverter: AVAudioConverter?
@@ -32,6 +36,13 @@ final class GeminiLiveClient: NSObject {
     private var converterOutputFormat: AVAudioFormat?
 
     private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+
+    private let vadSpeechRmsThreshold: Float = 0.02
+    private let vadContinueRmsThreshold: Float = 0.015
+    private let vadSilenceDurationSeconds: TimeInterval = 0.75
+    private var vadHasDetectedSpeechInCurrentTurn: Bool = false
+    private var vadSilenceBeganUptime: TimeInterval?
+    private var nextRmsLogUptime: TimeInterval = 0
 
     init(apiKey: String, model: String, systemPrompt: String, endpointUrlString: String = GeminiLiveClient.defaultEndpointUrlString) {
         self.apiKey = apiKey
@@ -122,6 +133,7 @@ final class GeminiLiveClient: NSObject {
         guard !trimmed.isEmpty else { return }
 
         guard isConnected else { return }
+        isAwaitingModelResponse = true
 
         let message: [String: Any] = [
             "clientContent": [
@@ -181,6 +193,9 @@ final class GeminiLiveClient: NSObject {
     
     private func sendAudioChunk(_ pcm16Data: Data, sampleRate: Int) {
         guard isConnected else { return }
+        guard isReadyForAudio else { return }
+        guard !isAwaitingModelResponse else { return }
+        guard !isPlayingAssistantAudio() else { return }
 
         let base64 = pcm16Data.base64EncodedString()
         let message: [String: Any] = [
@@ -201,6 +216,20 @@ final class GeminiLiveClient: NSObject {
             print("🎤 Sent \(audioChunkCounter) audio chunks (\(pcm16Data.count) bytes @ \(sampleRate)Hz)")
         }
         
+        sendJSON(message)
+    }
+
+    private func sendTurnComplete() {
+        guard isConnected else { return }
+        guard isReadyForAudio else { return }
+
+        let message: [String: Any] = [
+            "clientContent": [
+                "turns": [],
+                "turnComplete": true
+            ]
+        ]
+        print("📤 Sending turnComplete (audio)")
         sendJSON(message)
     }
 
@@ -271,6 +300,8 @@ final class GeminiLiveClient: NSObject {
         // Handle setupComplete
         if json["setupComplete"] != nil {
             print("✅ Setup complete - ready to receive audio!")
+            isReadyForAudio = true
+            startAudio()
             return
         }
 
@@ -300,6 +331,7 @@ final class GeminiLiveClient: NSObject {
         // Handle interruption
         if let interrupted = serverContent["interrupted"] as? Bool, interrupted {
             print("⚠️ Model was interrupted")
+            isAwaitingModelResponse = false
             return
         }
 
@@ -328,6 +360,7 @@ final class GeminiLiveClient: NSObject {
         // Handle turnComplete
         if serverContent["turnComplete"] != nil {
             print("✅ Turn complete")
+            isAwaitingModelResponse = false
         }
     }
 
@@ -350,6 +383,7 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func startAudio() {
+        guard isReadyForAudio else { return }
         stopAudio()
 
         inputNode = audioEngine.inputNode
@@ -400,6 +434,9 @@ final class GeminiLiveClient: NSObject {
         inputNode?.removeTap(onBus: 0)
         playerNode?.stop()
         playbackFormat = nil
+        playbackStateLock.lock()
+        pendingPlaybackBuffers = 0
+        playbackStateLock.unlock()
         audioConverter = nil
         converterInputFormat = nil
         converterOutputFormat = nil
@@ -407,6 +444,7 @@ final class GeminiLiveClient: NSObject {
 
     private func processAudioInput(buffer: AVAudioPCMBuffer) {
         guard isConnected else { return }
+        guard isReadyForAudio else { return }
 
         // Apply digital gain (10x) to boost generic mic input without excessive noise
         if let floatData = buffer.floatChannelData?[0] {
@@ -416,13 +454,21 @@ final class GeminiLiveClient: NSObject {
             }
         }
 
+        let rms = listAudioLevels(buffer)
+
         // Debug RMS levels (every ~2 seconds)
-        if audioChunkCounter % 20 == 0 {
-            let rms = listAudioLevels(buffer)
+        let now = ProcessInfo.processInfo.systemUptime
+        if now >= nextRmsLogUptime {
+            nextRmsLogUptime = now + 2.0
             print("🎤 Audio Input RMS: \(rms) (boosted 10x)")
         }
 
-        if let playerNode, playerNode.isPlaying {
+        if isAwaitingModelResponse || isPlayingAssistantAudio() {
+            return
+        }
+
+        updateTurnDetection(rms: rms)
+        if isAwaitingModelResponse {
             return
         }
 
@@ -496,6 +542,40 @@ final class GeminiLiveClient: NSObject {
         sendAudioChunk(pcmData, sampleRate: Int(buffer.format.sampleRate))
     }
 
+    private func updateTurnDetection(rms: Float) {
+        let now = ProcessInfo.processInfo.systemUptime
+
+        let isSpeech: Bool
+        if vadHasDetectedSpeechInCurrentTurn {
+            isSpeech = rms >= vadContinueRmsThreshold
+        } else {
+            isSpeech = rms >= vadSpeechRmsThreshold
+        }
+
+        if isSpeech {
+            vadHasDetectedSpeechInCurrentTurn = true
+            vadSilenceBeganUptime = nil
+            return
+        }
+
+        guard vadHasDetectedSpeechInCurrentTurn else { return }
+
+        if vadSilenceBeganUptime == nil {
+            vadSilenceBeganUptime = now
+            return
+        }
+
+        guard let silenceBegan = vadSilenceBeganUptime else { return }
+        if now - silenceBegan >= vadSilenceDurationSeconds {
+            vadHasDetectedSpeechInCurrentTurn = false
+            vadSilenceBeganUptime = nil
+
+            guard !isAwaitingModelResponse else { return }
+            isAwaitingModelResponse = true
+            sendTurnComplete()
+        }
+    }
+
     private func pcm16Data(from buffer: AVAudioPCMBuffer) -> Data? {
         guard buffer.format.commonFormat == .pcmFormatFloat32 else { return nil }
         guard let channelData = buffer.floatChannelData?[0] else { return nil }
@@ -516,6 +596,10 @@ final class GeminiLiveClient: NSObject {
 
         let desiredFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: sampleRate, channels: 1, interleaved: false)
         if playbackFormat?.sampleRate != desiredFormat?.sampleRate {
+            playbackStateLock.lock()
+            pendingPlaybackBuffers = 0
+            playbackStateLock.unlock()
+            playerNode.stop()
             audioEngine.stop()
             audioEngine.disconnectNodeInput(playerNode)
             audioEngine.disconnectNodeOutput(playerNode)
@@ -543,16 +627,43 @@ final class GeminiLiveClient: NSObject {
             }
         }
 
-        playerNode.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
+        incrementPendingPlaybackBuffers()
+        playerNode.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
+            self?.decrementPendingPlaybackBuffers()
+        }
         if !playerNode.isPlaying {
             playerNode.play()
         }
+    }
+
+    private func incrementPendingPlaybackBuffers() {
+        playbackStateLock.lock()
+        pendingPlaybackBuffers += 1
+        playbackStateLock.unlock()
+    }
+
+    private func decrementPendingPlaybackBuffers() {
+        playbackStateLock.lock()
+        pendingPlaybackBuffers = max(0, pendingPlaybackBuffers - 1)
+        playbackStateLock.unlock()
+    }
+
+    private func isPlayingAssistantAudio() -> Bool {
+        playbackStateLock.lock()
+        let isPlaying = pendingPlaybackBuffers > 0
+        playbackStateLock.unlock()
+        return isPlaying
     }
 
     private func teardownConnection(notify: Bool) {
         let hadActiveTask = (webSocketTask != nil)
 
         isConnected = false
+        isReadyForAudio = false
+        isAwaitingModelResponse = false
+        vadHasDetectedSpeechInCurrentTurn = false
+        vadSilenceBeganUptime = nil
+        nextRmsLogUptime = 0
         stopAudio()
 
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
@@ -674,15 +785,16 @@ extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate 
 
         print("✅ Gemini Live WebSocket opened successfully (protocol: \(`protocol` ?? "none"))")
         isConnected = true
+        isReadyForAudio = false
+        isAwaitingModelResponse = false
         delegate?.geminiLiveClient(self, didChangeStatus: .connected)
 
         receiveMessage()
         
         // Add a small delay before sending setup to ensure socket is ready for writes
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.25) { [weak self] in
             guard let self = self, self.isConnected else { return }
             self.sendSetup()
-            self.startAudio()
         }
     }
     
