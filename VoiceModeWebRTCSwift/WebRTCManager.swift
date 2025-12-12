@@ -97,10 +97,7 @@ class WebRTCManager: NSObject, ObservableObject {
     private var humeApiKey: String = ""
     private var humeSecretKey: String = ""
     // Error Handling
-    @Published var errorMessage: String?
-    
-    // Private tool definitions helper
-    @Published var errorMessage: String?
+
     
 
     // Private tool definitions helper
@@ -3284,8 +3281,8 @@ class WebRTCManager: NSObject, ObservableObject {
             }
             
             // Initialize and connect HumeClient
-            self.humeClient = HumeClient(apiKey: self.humeApiKey, secretKey: self.humeSecretKey)
-            self.humeClient?.delegate = self
+            self.humeSession = HumeClient(apiKey: self.humeApiKey, secretKey: self.humeSecretKey)
+            self.humeSession?.delegate = self
             self.connectionStatus = .connecting
             
             // Generate tool definitions to pass to Hume
@@ -3297,7 +3294,7 @@ class WebRTCManager: NSObject, ObservableObject {
             // 2. MCP Tools
             tools.append(contentsOf: mcpTools)
             
-            self.humeClient?.connect(tools: tools)
+            self.humeSession?.connect(tools: tools)
             return
         }
         
