@@ -219,6 +219,27 @@ final class GeminiLiveClient: NSObject {
         sendJSON(message)
     }
 
+    private func sendAudioTurnStartIfNeeded() {
+        guard isConnected else { return }
+        guard isReadyForAudio else { return }
+
+        let message: [String: Any] = [
+            "clientContent": [
+                "turns": [
+                    [
+                        "role": "user",
+                        "parts": [
+                            ["text": " "]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+
+        print("📤 Starting audio turn (clientContent)")
+        sendJSON(message)
+    }
+
     private func sendTurnComplete() {
         guard isConnected else { return }
         guard isReadyForAudio else { return }
@@ -553,6 +574,9 @@ final class GeminiLiveClient: NSObject {
         }
 
         if isSpeech {
+            if !vadHasDetectedSpeechInCurrentTurn {
+                sendAudioTurnStartIfNeeded()
+            }
             vadHasDetectedSpeechInCurrentTurn = true
             vadSilenceBeganUptime = nil
             return
