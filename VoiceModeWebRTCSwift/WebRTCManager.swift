@@ -2889,8 +2889,58 @@ class WebRTCManager: NSObject, ObservableObject {
             self.humeClient = HumeClient(apiKey: self.humeApiKey, secretKey: self.humeSecretKey)
             self.humeClient?.delegate = self
             self.connectionStatus = .connecting
-            self.humeClient?.connect()
             
+            // Generate tool definitions to pass to Hume
+            // We can reuse the same structure we send to OpenAI, as Hume EVI supports similar tool definitions.
+            var tools: [[String: Any]] = []
+            
+            // 1. Local Tools
+            tools.append(contactSearchTool)
+            tools.append(createCalendarEventTool)
+            tools.append(deleteCalendarEventTool)
+            tools.append(editCalendarEventTool)
+            tools.append(findCalendarEventsTool)
+            tools.append(createReminderTool)
+            tools.append(deleteReminderTool)
+            tools.append(editReminderTool)
+            tools.append(findRemindersTool)
+            tools.append(getDeviceInfoTool)
+            tools.append(getBatteryInfoTool)
+            tools.append(getStorageInfoTool)
+            tools.append(getNetworkInfoTool)
+            tools.append(setBrightnessTool)
+            tools.append(setVolumeTool)
+            tools.append(triggerHapticTool)
+            tools.append(takeScreenshotTool)
+            tools.append(getMusicInfoTool)
+            tools.append(controlMusicTool)
+            tools.append(searchAndPlayMusicTool)
+            tools.append(getPlaylistsTool)
+            tools.append(playPlaylistTool)
+            tools.append(toggleShuffleTool)
+            tools.append(toggleRepeatTool)
+            tools.append(endCallTool)
+            tools.append(delegateToGPT4OTool)
+            tools.append(toggleWiFiTool)
+            tools.append(toggleBluetoothTool)
+            tools.append(setDoNotDisturbTool)
+            tools.append(setAlarmTool)
+            tools.append(getAlarmsTool)
+            tools.append(takePhotoTool)
+            tools.append(getRecentPhotosTool)
+            tools.append(getCurrentLocationTool)
+            tools.append(getWeatherTool)
+            tools.append(createNoteTool)
+            tools.append(searchNotesTool)
+            tools.append(editNoteTool)
+            tools.append(deleteNoteTool)
+            tools.append(getAllNotesTool)
+            tools.append(runShortcutTool)
+            
+            // 2. MCP Tools
+            tools.append(contentsOf: mcpTools)
+            
+            self.humeClient?.connect(tools: tools)
             return
         }
         
@@ -3073,731 +3123,73 @@ class WebRTCManager: NSObject, ObservableObject {
         var allTools: [[String: Any]] = []
         
         // Add local contact search tool
-        let contactSearchTool: [String: Any] = [
-            "type": "function",
-            "name": "search_contacts",
-            "description": "Search the user's contacts by name. Use this tool whenever you need to find someone's phone number before sending a message.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "query": [
-                        "type": "string",
-                        "description": "The contact name to search for (e.g., 'Mom', 'John', 'Sarah Smith')"
-                    ],
-                    "limit": [
-                        "type": "integer", 
-                        "description": "Maximum number of results to return (default: 10)",
-                        "default": 10
-                    ]
-                ],
-                "required": ["query"]
-            ]
-        ]
         allTools.append(contactSearchTool)
         
         // Add local calendar creation tool
-        let createCalendarEventTool: [String: Any] = [
-            "type": "function",
-            "name": "create_calendar_event",
-            "description": "Create a new event in the user's local calendar.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "title": [
-                        "type": "string",
-                        "description": "The title of the calendar event."
-                    ],
-                    "start_time": [
-                        "type": "string",
-                        "description": "The start time of the event in ISO 8601 format (e.g., 2025-09-02T14:00:00-05:00)."
-                    ],
-                    "end_time": [
-                        "type": "string",
-                        "description": "The end time of the event in ISO 8601 format (e.g., 2025-09-02T15:00:00-05:00)."
-                    ]
-                ],
-                "required": ["title", "start_time", "end_time"]
-            ]
-        ]
         allTools.append(createCalendarEventTool)
-        
-        let deleteCalendarEventTool: [String: Any] = [
-            "type": "function",
-            "name": "delete_calendar_event",
-            "description": "Delete an event from the user's local calendar.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "event_id": [
-                        "type": "string",
-                        "description": "The ID of the event to delete."
-                    ]
-                ],
-                "required": ["event_id"]
-            ]
-        ]
         allTools.append(deleteCalendarEventTool)
-        
-        let editCalendarEventTool: [String: Any] = [
-            "type": "function",
-            "name": "edit_calendar_event",
-            "description": "Edit an event in the user's local calendar.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "event_id": [
-                        "type": "string",
-                        "description": "The ID of the event to edit."
-                    ],
-                    "new_title": [
-                        "type": "string",
-                        "description": "The new title for the event."
-                    ],
-                    "new_start_time": [
-                        "type": "string",
-                        "description": "The new start time for the event in ISO 8601 format."
-                    ],
-                    "new_end_time": [
-                        "type": "string",
-                        "description": "The new end time for the event in ISO 8601 format."
-                    ]
-                ],
-                "required": ["event_id"]
-            ]
-        ]
         allTools.append(editCalendarEventTool)
-
-        let findCalendarEventsTool: [String: Any] = [
-            "type": "function",
-            "name": "find_calendar_events",
-            "description": "Find events in the user's local calendar.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "title": [
-                        "type": "string",
-                        "description": "The title of the event to find."
-                    ],
-                    "start_date": [
-                        "type": "string",
-                        "description": "The start date to search for events, in ISO 8601 format."
-                    ],
-                    "end_date": [
-                        "type": "string",
-                        "description": "The end date to search for events, in ISO 8601 format."
-                    ]
-                ],
-                "required": []
-            ]
-        ]
         allTools.append(findCalendarEventsTool)
         
         // Add reminder creation tool
-        let createReminderTool: [String: Any] = [
-            "type": "function",
-            "name": "create_reminder",
-            "description": "Create a new reminder in the user's local reminders app.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "title": [
-                        "type": "string",
-                        "description": "The title of the reminder."
-                    ],
-                    "due_date": [
-                        "type": "string",
-                        "description": "The due date for the reminder in ISO 8601 format (e.g., 2025-09-02T14:00:00-05:00). Optional."
-                    ],
-                    "notes": [
-                        "type": "string",
-                        "description": "Additional notes for the reminder. Optional."
-                    ]
-                ],
-                "required": ["title"]
-            ]
-        ]
         allTools.append(createReminderTool)
-        
-        let deleteReminderTool: [String: Any] = [
-            "type": "function",
-            "name": "delete_reminder",
-            "description": "Delete a reminder from the user's local reminders app.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "reminder_id": [
-                        "type": "string",
-                        "description": "The ID of the reminder to delete."
-                    ]
-                ],
-                "required": ["reminder_id"]
-            ]
-        ]
         allTools.append(deleteReminderTool)
-        
-        let editReminderTool: [String: Any] = [
-            "type": "function",
-            "name": "edit_reminder",
-            "description": "Edit a reminder in the user's local reminders app.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "reminder_id": [
-                        "type": "string",
-                        "description": "The ID of the reminder to edit."
-                    ],
-                    "new_title": [
-                        "type": "string",
-                        "description": "The new title for the reminder."
-                    ],
-                    "new_due_date": [
-                        "type": "string",
-                        "description": "The new due date for the reminder in ISO 8601 format."
-                    ],
-                    "new_notes": [
-                        "type": "string",
-                        "description": "The new notes for the reminder."
-                    ]
-                ],
-                "required": ["reminder_id"]
-            ]
-        ]
         allTools.append(editReminderTool)
-
-        let findRemindersTool: [String: Any] = [
-            "type": "function",
-            "name": "find_reminders",
-            "description": "Find reminders in the user's local reminders app.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "title": [
-                        "type": "string",
-                        "description": "The title of the reminder to find."
-                    ],
-                    "due_date": [
-                        "type": "string",
-                        "description": "The due date to search for reminders, in ISO 8601 format."
-                    ],
-                    "completed": [
-                        "type": "boolean",
-                        "description": "Filter by completion status. true for completed, false for pending, null for all."
-                    ]
-                ],
-                "required": []
-            ]
-        ]
         allTools.append(findRemindersTool)
         
         // Add Device Information Tools
-        let getDeviceInfoTool: [String: Any] = [
-            "type": "function",
-            "name": "get_device_info",
-            "description": "Get comprehensive device information including model, system version, screen details, and orientation.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(getDeviceInfoTool)
-        
-        let getBatteryInfoTool: [String: Any] = [
-            "type": "function",
-            "name": "get_battery_info",
-            "description": "Get current battery information including level, percentage, and charging status.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(getBatteryInfoTool)
-        
-        let getStorageInfoTool: [String: Any] = [
-            "type": "function",
-            "name": "get_storage_info",
-            "description": "Get device storage information including total, free, and used space.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(getStorageInfoTool)
-        
-        let getNetworkInfoTool: [String: Any] = [
-            "type": "function",
-            "name": "get_network_info",
-            "description": "Get current network connectivity status and information.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(getNetworkInfoTool)
         
         // Add System Control Tools
-        let setBrightnessTool: [String: Any] = [
-            "type": "function",
-            "name": "set_brightness",
-            "description": "Set the device screen brightness level.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "brightness": [
-                        "type": "number",
-                        "description": "Brightness level from 0.0 (darkest) to 1.0 (brightest). Can also use percentage like 0.5 for 50%."
-                    ]
-                ],
-                "required": ["brightness"]
-            ]
-        ]
         allTools.append(setBrightnessTool)
-        
-        let setVolumeTool: [String: Any] = [
-            "type": "function",
-            "name": "set_volume",
-            "description": "Set the device audio volume level.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "volume": [
-                        "type": "number",
-                        "description": "Volume level from 0.0 (silent) to 1.0 (maximum). Can also use percentage like 0.5 for 50%."
-                    ]
-                ],
-                "required": ["volume"]
-            ]
-        ]
         allTools.append(setVolumeTool)
-        
-        let triggerHapticTool: [String: Any] = [
-            "type": "function",
-            "name": "trigger_haptic",
-            "description": "Trigger haptic feedback on the device.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "style": [
-                        "type": "string",
-                        "description": "Haptic feedback style: 'light', 'medium', 'heavy', 'success', 'warning', 'error', or 'selection'."
-                    ]
-                ],
-                "required": ["style"]
-            ]
-        ]
         allTools.append(triggerHapticTool)
-        
-        let takeScreenshotTool: [String: Any] = [
-            "type": "function",
-            "name": "take_screenshot",
-            "description": "Take a screenshot of the current screen and save it to Photos.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(takeScreenshotTool)
         
         // Add Media Control Tools
-        let getMusicInfoTool: [String: Any] = [
-            "type": "function",
-            "name": "get_music_info",
-            "description": "Get information about currently playing music including title, artist, album, and playback state.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(getMusicInfoTool)
-        
-        let controlMusicTool: [String: Any] = [
-            "type": "function",
-            "name": "control_music",
-            "description": "Control music playback on the device.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "action": [
-                        "type": "string",
-                        "description": "Music control action: 'play', 'pause', 'stop', 'next', or 'previous'."
-                    ]
-                ],
-                "required": ["action"]
-            ]
-        ]
         allTools.append(controlMusicTool)
-        
-        let searchAndPlayMusicTool: [String: Any] = [
-            "type": "function",
-            "name": "search_and_play_music",
-            "description": "Search for and play specific songs from the user's music library. Can search by song title, artist, album, or any combination.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "query": [
-                        "type": "string",
-                        "description": "The search query - can be a song title, artist name, album name, or any combination."
-                    ],
-                    "search_type": [
-                        "type": "string",
-                        "description": "Type of search: 'all' (default, searches everything), 'artist', 'album', 'song', or 'title'.",
-                        "default": "all"
-                    ]
-                ],
-                "required": ["query"]
-            ]
-        ]
         allTools.append(searchAndPlayMusicTool)
         
-        let endCallTool: [String: Any] = [
-            "type": "function",
-            "name": "end_call",
-            "description": "End the current call/conversation and close the app. Use this when the user says goodbye, wants to end the call, or is finished with the conversation.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(endCallTool)
 
-        let delegateToGPT4OTool: [String: Any] = [
-            "type": "function",
-            "name": "delegate_to_gpt4o",
-            "description": "Offload token-heavy text generation to a standard text model (defaults to gpt-5-2025-08-07). Use this when you need a detailed or lengthy written answer without streaming it from the realtime model.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "prompt": [
-                        "type": "string",
-                        "description": "The user request to forward to the delegated GPT-5 model."
-                    ],
-                    "system": [
-                        "type": "string",
-                        "description": "Optional system guidance or constraints for the delegated model."
-                    ],
-                    "model": [
-                        "type": "string",
-                        "description": "Alternate delegated model to use (defaults to gpt-5-2025-08-07).",
-                        "default": "gpt-5-2025-08-07"
-                    ],
-                    "max_output_tokens": [
-                        "type": "integer",
-                        "description": "Optional cap on delegated response length (default 800 tokens)."
-                    ]
-                ],
-                "required": ["prompt"]
-            ]
-        ]
         allTools.append(delegateToGPT4OTool)
 
         // Add System Control Tools
-        let toggleWiFiTool: [String: Any] = [
-            "type": "function",
-            "name": "toggle_wifi",
-            "description": "Toggle WiFi on or off. Note: This requires manual settings access on iOS.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "enabled": [
-                        "type": "boolean",
-                        "description": "Whether to enable (true) or disable (false) WiFi"
-                    ]
-                ],
-                "required": ["enabled"]
-            ]
-        ]
         allTools.append(toggleWiFiTool)
-        
-        let toggleBluetoothTool: [String: Any] = [
-            "type": "function",
-            "name": "toggle_bluetooth",
-            "description": "Toggle Bluetooth on or off. Note: This requires manual settings access on iOS.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "enabled": [
-                        "type": "boolean",
-                        "description": "Whether to enable (true) or disable (false) Bluetooth"
-                    ]
-                ],
-                "required": ["enabled"]
-            ]
-        ]
         allTools.append(toggleBluetoothTool)
         
-
-        let setDoNotDisturbTool: [String: Any] = [
-            "type": "function",
-            "name": "set_do_not_disturb",
-            "description": "Enable or disable Do Not Disturb mode. Note: This requires manual settings access on iOS.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "enabled": [
-                        "type": "boolean",
-                        "description": "Whether to enable (true) or disable (false) Do Not Disturb"
-                    ]
-                ],
-                "required": ["enabled"]
-            ]
-        ]
         allTools.append(setDoNotDisturbTool)
         
         // Add Alarm Management Tools
-        let setAlarmTool: [String: Any] = [
-            "type": "function",
-            "name": "set_alarm",
-            "description": "Set an alarm for a specific time. Note: This requires using the Clock app or Siri.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "time": [
-                        "type": "string",
-                        "description": "Time for the alarm in format like '7:30 AM' or '19:30'"
-                    ],
-                    "label": [
-                        "type": "string",
-                        "description": "Optional label for the alarm"
-                    ]
-                ],
-                "required": ["time"]
-            ]
-        ]
         allTools.append(setAlarmTool)
-        
-        let getAlarmsTool: [String: Any] = [
-            "type": "function",
-            "name": "get_alarms",
-            "description": "Get information about current alarms. Note: This requires using the Clock app or Siri.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(getAlarmsTool)
         
         // Add Camera & Photo Tools
-        let takePhotoTool: [String: Any] = [
-            "type": "function",
-            "name": "take_photo",
-            "description": "Take a photo with the camera. Note: This requires using the Camera app or Siri.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(takePhotoTool)
-        
-        let getRecentPhotosTool: [String: Any] = [
-            "type": "function",
-            "name": "get_recent_photos",
-            "description": "Get information about recent photos in the user's photo library.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "count": [
-                        "type": "integer",
-                        "description": "Number of recent photos to retrieve (default: 10)",
-                        "default": 10
-                    ]
-                ],
-                "required": []
-            ]
-        ]
         allTools.append(getRecentPhotosTool)
         
         // Add Weather & Location Tools
-        let getCurrentLocationTool: [String: Any] = [
-            "type": "function",
-            "name": "get_current_location",
-            "description": "Get the user's current location. Note: This requires location services and using Maps or Siri.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(getCurrentLocationTool)
-        
-        let getWeatherTool: [String: Any] = [
-            "type": "function",
-            "name": "get_weather",
-            "description": "Get current weather information. Note: This requires using the Weather app or Siri.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(getWeatherTool)
         
         // Add Enhanced Media Control Tools
-        let getPlaylistsTool: [String: Any] = [
-            "type": "function",
-            "name": "get_playlists",
-            "description": "Get a list of all playlists in the user's music library.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(getPlaylistsTool)
-        
-        let playPlaylistTool: [String: Any] = [
-            "type": "function",
-            "name": "play_playlist",
-            "description": "Play a specific playlist by name from the user's music library.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "name": [
-                        "type": "string",
-                        "description": "Name of the playlist to play"
-                    ]
-                ],
-                "required": ["name"]
-            ]
-        ]
         allTools.append(playPlaylistTool)
-        
-        let toggleShuffleTool: [String: Any] = [
-            "type": "function",
-            "name": "toggle_shuffle",
-            "description": "Toggle shuffle mode for music playback on/off.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(toggleShuffleTool)
-        
-        let toggleRepeatTool: [String: Any] = [
-            "type": "function",
-            "name": "toggle_repeat",
-            "description": "Toggle repeat mode for music playback (off → one song → all songs → off).",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(toggleRepeatTool)
         
         // Add Notes Integration Tools
-        let createNoteTool: [String: Any] = [
-            "type": "function",
-            "name": "create_note",
-            "description": "Create a new note in the Notes app. Note: This requires using the Notes app or Siri.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "title": [
-                        "type": "string",
-                        "description": "Title of the note"
-                    ],
-                    "content": [
-                        "type": "string",
-                        "description": "Content/body of the note"
-                    ]
-                ],
-                "required": ["title", "content"]
-            ]
-        ]
         allTools.append(createNoteTool)
-        
-        let searchNotesTool: [String: Any] = [
-            "type": "function",
-            "name": "search_notes",
-            "description": "Search through notes in the Notes app. Note: This requires using the Notes app or Siri.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "query": [
-                        "type": "string",
-                        "description": "Search query to find in notes"
-                    ]
-                ],
-                "required": ["query"]
-            ]
-        ]
         allTools.append(searchNotesTool)
-        
-        let editNoteTool: [String: Any] = [
-            "type": "function",
-            "name": "edit_note",
-            "description": "Edit an existing note in the Notes app. Note: This requires using the Notes app or Siri.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "note_id": [
-                        "type": "string",
-                        "description": "The ID of the note to edit"
-                    ],
-                    "new_content": [
-                        "type": "string",
-                        "description": "The new content for the note"
-                    ]
-                ],
-                "required": ["note_id", "new_content"]
-            ]
-        ]
         allTools.append(editNoteTool)
-        
-        let deleteNoteTool: [String: Any] = [
-            "type": "function",
-            "name": "delete_note",
-            "description": "Delete a note from the Notes app. Note: This requires using the Notes app or Siri.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "note_id": [
-                        "type": "string",
-                        "description": "The ID of the note to delete"
-                    ]
-                ],
-                "required": ["note_id"]
-            ]
-        ]
         allTools.append(deleteNoteTool)
-        
-        let getAllNotesTool: [String: Any] = [
-            "type": "function",
-            "name": "get_all_notes",
-            "description": "Get all notes from the Notes app with their IDs, titles, and content. Use this to see available notes before editing or deleting them.",
-            "parameters": [
-                "type": "object",
-                "properties": [:],
-                "required": []
-            ]
-        ]
         allTools.append(getAllNotesTool)
         
         // Add Shortcuts Integration Tools
-        let runShortcutTool: [String: Any] = [
-            "type": "function",
-            "name": "run_shortcut",
-            "description": "Run a specific iOS Shortcut by name. Note: This requires using the Shortcuts app or Siri.",
-            "parameters": [
-                "type": "object",
-                "properties": [
-                    "name": [
-                        "type": "string",
-                        "description": "Name of the shortcut to run"
-                    ]
-                ],
-                "required": ["name"]
-            ]
-        ]
         allTools.append(runShortcutTool)
         
         // Add MCP tools if configured
@@ -4378,12 +3770,14 @@ extension WebRTCManager: HumeClientDelegate {
     func humeClient(_ client: HumeClient, didReceiveMessage message: ConversationItem) {
         DispatchQueue.main.async {
             self.conversation.append(message)
+            self.conversationMap[message.id] = message
         }
     }
     
     func humeClient(_ client: HumeClient, didEncounterError error: Error) {
-        print("❌ Hume Client Error: \(error)")
+        print("❌ Hume Client Error: \(error.localizedDescription)")
         DispatchQueue.main.async {
+            self.errorMessage = error.localizedDescription
             let errorItem = ConversationItem(
                 id: UUID().uuidString,
                 role: "system",
@@ -4391,6 +3785,176 @@ extension WebRTCManager: HumeClientDelegate {
             )
             self.conversation.append(errorItem)
             self.connectionStatus = .disconnected
+        }
+    }
+    
+    func humeClient(_ client: HumeClient, didRequestTool toolName: String, arguments: String, callId: String) {
+        print("🔧 Executing Hume Tool: \(toolName) with args: \(arguments)")
+        
+        // Reuse the existing tool execution logic?
+        // We need to parse arguments and execute.
+        // Since the existing logic is tied to DataChannel messages, we'll replicate the routing here for now or refactor.
+        // For speed, let's just route manually to the known functions.
+        
+        Task {
+            var result: String = "Error: Unknown tool or invalid arguments"
+            
+            // Parse arguments
+            let argsDict = (try? JSONSerialization.jsonObject(with: arguments.data(using: .utf8) ?? Data()) as? [String: Any]) ?? [:]
+            
+            // Check Local Tools
+            if localToolNames.contains(toolName) {
+                // Route to local function
+                switch toolName {
+                case "search_contacts":
+                    if let query = argsDict["query"] as? String {
+                        result = await searchContacts(query: query)
+                    }
+                case "create_calendar_event":
+                   if let title = argsDict["title"] as? String,
+                      let startTime = argsDict["start_time"] as? String,
+                      let endTime = argsDict["end_time"] as? String {
+                       result = await createCalendarEvent(title: title, startTime: startTime, endTime: endTime)
+                   }
+                case "delete_calendar_event":
+                    if let eventId = argsDict["event_id"] as? String {
+                        result = await deleteCalendarEvent(eventId: eventId)
+                    }
+                case "edit_calendar_event":
+                    if let eventId = argsDict["event_id"] as? String {
+                        result = await editCalendarEvent(eventId: eventId, newTitle: argsDict["new_title"] as? String, newStartTime: argsDict["new_start_time"] as? String, newEndTime: argsDict["new_end_time"] as? String)
+                    }
+                case "find_calendar_events":
+                    result = await findCalendarEvents(title: argsDict["title"] as? String, startDate: argsDict["start_date"] as? String, endDate: argsDict["end_date"] as? String)
+                case "create_reminder":
+                    if let title = argsDict["title"] as? String {
+                        result = await createReminder(title: title, dueDate: argsDict["due_date"] as? String, notes: argsDict["notes"] as? String)
+                    }
+                case "delete_reminder":
+                    if let reminderId = argsDict["reminder_id"] as? String {
+                        result = await deleteReminder(reminderId: reminderId)
+                    }
+                case "edit_reminder":
+                    if let reminderId = argsDict["reminder_id"] as? String {
+                        result = await editReminder(reminderId: reminderId, newTitle: argsDict["new_title"] as? String, newDueDate: argsDict["new_due_date"] as? String, newNotes: argsDict["new_notes"] as? String)
+                    }
+                case "find_reminders":
+                    result = await findReminders(title: argsDict["title"] as? String, dueDate: argsDict["due_date"] as? String, completed: argsDict["completed"] as? Bool)
+                case "get_device_info":
+                    result = getDeviceInfo()
+                case "get_battery_info":
+                    result = getBatteryInfo()
+                case "get_storage_info":
+                    result = getStorageInfo()
+                case "get_network_info":
+                    result = getNetworkInfo()
+                case "set_brightness":
+                    if let brightness = argsDict["brightness"] as? Double {
+                        result = setBrightness(brightness: brightness)
+                    }
+                case "set_volume":
+                    if let volume = argsDict["volume"] as? Double {
+                        result = setVolume(volume: volume)
+                    }
+                case "trigger_haptic":
+                    if let style = argsDict["style"] as? String {
+                        result = triggerHaptic(style: style)
+                    }
+                case "take_screenshot":
+                    result = await takeScreenshot()
+                case "get_music_info":
+                    result = await getMusicInfo()
+                case "control_music":
+                    if let action = argsDict["action"] as? String {
+                        result = await controlMusic(action: action)
+                    }
+                case "search_and_play_music":
+                    if let query = argsDict["query"] as? String {
+                        result = await searchAndPlayMusic(query: query, searchType: argsDict["search_type"] as? String)
+                    }
+                case "get_playlists":
+                    result = await getPlaylists()
+                case "play_playlist":
+                    if let name = argsDict["name"] as? String {
+                        result = await playPlaylist(name: name)
+                    }
+                case "toggle_shuffle":
+                    result = await toggleShuffle()
+                case "toggle_repeat":
+                    result = await toggleRepeat()
+                case "end_call":
+                    result = endCall()
+                case "delegate_to_gpt4o":
+                    if let prompt = argsDict["prompt"] as? String {
+                        let system = argsDict["system"] as? String
+                        let model = argsDict["model"] as? String
+                        let maxOutputTokens = argsDict["max_output_tokens"] as? Int
+                        result = await performDelegatedTextCompletion(apiKey: currentApiKey, prompt: prompt, system: system, model: model, maxOutputTokens: maxOutputTokens)
+                    }
+                case "toggle_wifi":
+                    if let enabled = argsDict["enabled"] as? Bool {
+                        result = toggleWiFi(enabled: enabled)
+                    }
+                case "toggle_bluetooth":
+                    if let enabled = argsDict["enabled"] as? Bool {
+                        result = toggleBluetooth(enabled: enabled)
+                    }
+                case "set_do_not_disturb":
+                    if let enabled = argsDict["enabled"] as? Bool {
+                        result = setDoNotDisturb(enabled: enabled)
+                    }
+                case "set_alarm":
+                    if let time = argsDict["time"] as? String {
+                        result = setAlarm(time: time, label: argsDict["label"] as? String)
+                    }
+                case "get_alarms":
+                    result = getAlarms()
+                case "take_photo":
+                    result = await takePhoto()
+                case "get_recent_photos":
+                    let count = argsDict["count"] as? Int ?? 10
+                    result = await getRecentPhotos(count: count)
+                case "get_current_location":
+                    result = await getCurrentLocation()
+                case "get_weather":
+                    result = await getWeather()
+                case "create_note":
+                    if let title = argsDict["title"] as? String, let content = argsDict["content"] as? String {
+                        result = createNote(title: title, content: content)
+                    }
+                case "search_notes":
+                    if let query = argsDict["query"] as? String {
+                        result = searchNotes(query: query)
+                    }
+                case "edit_note":
+                    if let noteId = argsDict["note_id"] as? String, let newContent = argsDict["new_content"] as? String {
+                        result = editNote(noteId: noteId, newContent: newContent)
+                    }
+                case "delete_note":
+                    if let noteId = argsDict["note_id"] as? String {
+                        result = deleteNote(noteId: noteId)
+                    }
+                case "get_all_notes":
+                    result = getAllNotes()
+                case "run_shortcut":
+                    if let name = argsDict["name"] as? String {
+                        result = await runShortcut(name: name)
+                    }
+                default:
+                    print("⚠️ Hume requested unknown local tool: \(toolName)")
+                    result = "Error: Unknown local tool '\(toolName)'"
+                }
+            } else {
+                // MCP Tool
+                do {
+                    result = try await mcpClient.callTool(name: toolName, arguments: argsDict)
+                } catch {
+                    result = "Error executing MCP tool: \(error.localizedDescription)"
+                }
+            }
+            
+            // Send result back to Hume
+            client.sendToolOutput(callId: callId, output: result)
         }
     }
 }
