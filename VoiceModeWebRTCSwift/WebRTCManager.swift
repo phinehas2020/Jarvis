@@ -40,6 +40,50 @@ class WebRTCManager: NSObject, ObservableObject {
     
     // MCP Tools configuration
     private var mcpTools: [[String: Any]] = []
+    private var mcpExpectedToolNames: Set<String> = []
+    private let localToolNames: Set<String> = [
+        "search_contacts",
+        "create_calendar_event",
+        "delete_calendar_event",
+        "edit_calendar_event",
+        "find_calendar_events",
+        "create_reminder",
+        "delete_reminder",
+        "edit_reminder",
+        "find_reminders",
+        "get_device_info",
+        "get_battery_info",
+        "get_storage_info",
+        "get_network_info",
+        "set_brightness",
+        "set_volume",
+        "trigger_haptic",
+        "take_screenshot",
+        "get_music_info",
+        "control_music",
+        "search_and_play_music",
+        "end_call",
+        "delegate_to_gpt4o",
+        "toggle_wifi",
+        "toggle_bluetooth",
+        "set_do_not_disturb",
+        "set_alarm",
+        "get_alarms",
+        "take_photo",
+        "get_recent_photos",
+        "get_current_location",
+        "get_weather",
+        "get_playlists",
+        "play_playlist",
+        "toggle_shuffle",
+        "toggle_repeat",
+        "create_note",
+        "search_notes",
+        "edit_note",
+        "delete_note",
+        "get_all_notes",
+        "run_shortcut"
+    ]
     
     // WebRTC references
     private var peerConnection: RTCPeerConnection?
@@ -89,6 +133,7 @@ class WebRTCManager: NSObject, ObservableObject {
         print("🔧 Added MCP tool: \(serverLabel) at \(serverUrl)")
         
         if let toolNames = expectedToolNames, !toolNames.isEmpty {
+            mcpExpectedToolNames.formUnion(toolNames)
             print("📋 \(serverLabel) advertised MCP tools:")
             for name in toolNames {
                 print("   • \(name)")
@@ -1627,6 +1672,134 @@ class WebRTCManager: NSObject, ObservableObject {
         } catch {
             print("❌ Failed to send function call output: \(error)")
         }
+    }
+
+    // MARK: - MCP Client
+
+    private func activeMcpServerConfig() -> (url: URL, authorization: String?)? {
+        guard let tool = mcpTools.first,
+              let urlString = tool["server_url"] as? String,
+              let url = URL(string: urlString) else {
+            return nil
+        }
+
+        let authorization = tool["authorization"] as? String
+        return (url: url, authorization: authorization)
+    }
+
+    private func normalizedMcpAuthorizationHeader(_ raw: String?) -> String? {
+        guard let raw, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        if raw.lowercased().hasPrefix("bearer ") {
+            return raw
+        }
+
+        return "Bearer \(raw)"
+    }
+
+    private func performMcpToolCall(name: String, arguments: [String: Any]) async -> String {
+        guard let config = activeMcpServerConfig() else {
+            return "{\"ok\":false,\"error\":\"mcp_not_configured\"}"
+        }
+
+        do {
+            let response = try await callMcpToolOverWebSocket(
+                serverUrl: config.url,
+                authorization: config.authorization,
+                toolName: name,
+                toolArguments: arguments
+            )
+
+            if let result = response["result"] as? [String: Any] {
+                if let structured = result["structuredContent"] {
+                    return jsonString(from: structured) ?? "{}"
+                }
+                if let content = result["content"] as? [[String: Any]],
+                   let firstText = content.first?["text"] as? String {
+                    return firstText
+                }
+                return jsonString(from: result) ?? "{}"
+            }
+
+            if let errorInfo = response["error"] as? [String: Any] {
+                let payload: [String: Any] = [
+                    "ok": false,
+                    "error": errorInfo["message"] as? String ?? "mcp_error",
+                    "details": errorInfo
+                ]
+                return jsonString(from: payload) ?? "{\"ok\":false}"
+            }
+
+            return jsonString(from: response) ?? "{}"
+        } catch {
+            let payload: [String: Any] = [
+                "ok": false,
+                "error": error.localizedDescription
+            ]
+            return jsonString(from: payload) ?? "{\"ok\":false}"
+        }
+    }
+
+    private func callMcpToolOverWebSocket(
+        serverUrl: URL,
+        authorization: String?,
+        toolName: String,
+        toolArguments: [String: Any]
+    ) async throws -> [String: Any] {
+        var request = URLRequest(url: serverUrl)
+        request.setValue("mcp", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        if let header = normalizedMcpAuthorizationHeader(authorization) {
+            request.setValue(header, forHTTPHeaderField: "Authorization")
+        }
+
+        let task = URLSession.shared.webSocketTask(with: request)
+        task.resume()
+        defer { task.cancel(with: .normalClosure, reason: nil) }
+
+        let rpcId = UUID().uuidString
+        let payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": rpcId,
+            "method": "tools/call",
+            "params": [
+                "name": toolName,
+                "arguments": toolArguments
+            ]
+        ]
+
+        let jsonData = try JSONSerialization.data(withJSONObject: payload)
+        guard let jsonText = String(data: jsonData, encoding: .utf8) else {
+            throw NSError(domain: "WebRTCManager.MCP", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unable to encode MCP request"])
+        }
+
+        try await task.send(.string(jsonText))
+
+        for _ in 0..<10 {
+            let message = try await task.receive()
+            let responseText: String
+            switch message {
+            case .string(let text):
+                responseText = text
+            case .data(let data):
+                responseText = String(data: data, encoding: .utf8) ?? ""
+            @unknown default:
+                responseText = ""
+            }
+
+            guard !responseText.isEmpty,
+                  let responseData = responseText.data(using: .utf8),
+                  let responseObj = try JSONSerialization.jsonObject(with: responseData) as? [String: Any] else {
+                continue
+            }
+
+            if let responseId = responseObj["id"] as? String, responseId == rpcId {
+                return responseObj
+            }
+        }
+
+        throw NSError(domain: "WebRTCManager.MCP", code: -2, userInfo: [NSLocalizedDescriptionKey: "No MCP response received"])
     }
 
     /// Encode JSON dictionaries into a string payload for the realtime API
@@ -3832,16 +4005,47 @@ class WebRTCManager: NSObject, ObservableObject {
             requestAssistantResponseAfterTool(force: true, context: "\(eventType)-failure")
             
         case "response.function_call_arguments.done":
-            // Handle local function calls (like contact search)
             if let itemId = eventDict["item_id"] as? String,
-               let callId = eventDict["call_id"] as? String, // <-- ADD THIS LINE to extract the correct ID
+               let callId = eventDict["call_id"] as? String,
                let name = eventDict["name"] as? String,
                let arguments = eventDict["arguments"] as? String {
 
-                print("🔧 Local function call: \(name) with call_id: \(callId) and args: \(arguments)")
-                // Use the correct `callId` from the event, not the `itemId`
-                markAwaitingToolResponse(context: name)
-                handleLocalFunctionCall(itemId: itemId, callId: callId, name: name, arguments: arguments) // <-- CHANGE `callId: itemId` to `callId: callId`
+                if localToolNames.contains(name) {
+                    print("🔧 Local function call: \(name) with call_id: \(callId) and args: \(arguments)")
+                    markAwaitingToolResponse(context: name)
+                    handleLocalFunctionCall(itemId: itemId, callId: callId, name: name, arguments: arguments)
+                    return
+                }
+
+                if mcpExpectedToolNames.contains(name) || !mcpTools.isEmpty {
+                    print("🔧 MCP tool call requested: \(name) with call_id: \(callId)")
+                    markAwaitingToolResponse(context: "mcp:\(name)")
+
+                    Task.detached(priority: .userInitiated) { [weak self] in
+                        guard let self else { return }
+
+                        var argDict: [String: Any] = [:]
+                        if let argData = arguments.data(using: .utf8),
+                           let parsed = try? JSONSerialization.jsonObject(with: argData) as? [String: Any] {
+                            argDict = parsed
+                        }
+
+                        if name == "send_imessage",
+                           argDict["text"] == nil,
+                           let messageText = argDict["message"] as? String {
+                            argDict["text"] = messageText
+                        }
+
+                        let output = await self.performMcpToolCall(name: name, arguments: argDict)
+                        await MainActor.run {
+                            self.sendFunctionCallOutput(previousItemId: itemId, callId: callId, output: output)
+                        }
+                    }
+                    return
+                }
+
+                print("⚠️ Function call for unknown tool: \(name)")
+                return
             } else {
                 print("🔧 Function call args done but missing required fields: \(eventDict)")
             }

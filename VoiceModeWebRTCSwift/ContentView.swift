@@ -52,7 +52,7 @@ struct ContentView: View {
             Messaging Tools (MCP)
             
             Available MCP tools from the bridge:
-            - `send_imessage` – Send an outbound iMessage to a single recipient. Input: `{ to, text }` where `to` is E.164 or an Apple ID.
+            - `send_imessage` – Send an outbound iMessage to a single recipient. Input: `{ to, text }` (field name is `text`, not `message`) where `to` is E.164 or an Apple ID.
             - `fetch_messages` – Fetch messages from BlueBubbles. Use `handle`, `chatGuid`, `since`, `limit` as filters.
             - `get_status` – Get quiet-hours / rate-limit state from the bridge.
             
