@@ -96,7 +96,409 @@ class WebRTCManager: NSObject, ObservableObject {
     @Published var currentProvider: VoiceProvider = .openAI
     private var humeApiKey: String = ""
     private var humeSecretKey: String = ""
+    @Published var currentProvider: VoiceProvider = .openAI
+    private var humeApiKey: String = ""
+    private var humeSecretKey: String = ""
     private var humeClient: HumeClient?
+    
+    // Error Handling
+    @Published var errorMessage: String?
+    
+    // MCP Client
+    private let mcpClient = MCPClient() // Assuming you have an MCPClient class
+    
+    // Private tool definitions helper
+    private func getLocalTools() -> [[String: Any]] {
+        return [
+            [
+                "type": "function",
+                "name": "search_contacts",
+                "description": "Search the user's contacts by name.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "query": ["type": "string", "description": "Name to search"]
+                    ],
+                    "required": ["query"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "create_calendar_event",
+                "description": "Create a new calendar event.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "title": ["type": "string"],
+                        "start_time": ["type": "string", "description": "ISO 8601 format"],
+                        "end_time": ["type": "string", "description": "ISO 8601 format"]
+                    ],
+                    "required": ["title", "start_time", "end_time"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "delete_calendar_event",
+                "description": "Delete a calendar event.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "event_id": ["type": "string"]
+                    ],
+                    "required": ["event_id"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "edit_calendar_event",
+                "description": "Edit a calendar event.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "event_id": ["type": "string"],
+                        "new_title": ["type": "string"],
+                        "new_start_time": ["type": "string"],
+                        "new_end_time": ["type": "string"]
+                    ],
+                    "required": ["event_id"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "find_calendar_events",
+                "description": "Find calendar events.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "title": ["type": "string"],
+                        "start_date": ["type": "string"],
+                        "end_date": ["type": "string"]
+                    ],
+                    "required": []
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "create_reminder",
+                "description": "Create a reminder.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "title": ["type": "string"],
+                        "due_date": ["type": "string"],
+                        "notes": ["type": "string"]
+                    ],
+                    "required": ["title"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "delete_reminder",
+                "description": "Delete a reminder.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "reminder_id": ["type": "string"]
+                    ],
+                    "required": ["reminder_id"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "edit_reminder",
+                "description": "Edit a reminder.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "reminder_id": ["type": "string"],
+                        "new_title": ["type": "string"],
+                        "new_due_date": ["type": "string"],
+                        "new_notes": ["type": "string"]
+                    ],
+                    "required": ["reminder_id"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "find_reminders",
+                "description": "Find reminders.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "title": ["type": "string"],
+                        "due_date": ["type": "string"],
+                        "completed": ["type": "boolean"]
+                    ],
+                    "required": []
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "get_device_info",
+                "description": "Get device info.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "get_battery_info",
+                "description": "Get battery info.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "get_storage_info",
+                "description": "Get storage info.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "get_network_info",
+                "description": "Get network info.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "set_brightness",
+                "description": "Set screen brightness (0.0 to 1.0).",
+                "parameters": [
+                    "type": "object",
+                    "properties": ["brightness": ["type": "number"]],
+                    "required": ["brightness"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "set_volume",
+                "description": "Set volume (0.0 to 1.0).",
+                "parameters": [
+                    "type": "object",
+                    "properties": ["volume": ["type": "number"]],
+                    "required": ["volume"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "trigger_haptic",
+                "description": "Trigger haptic feedback.",
+                "parameters": [
+                    "type": "object",
+                    "properties": ["style": ["type": "string"]],
+                    "required": ["style"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "take_screenshot",
+                "description": "Take a screenshot.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "get_music_info",
+                "description": "Get current music info.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "control_music",
+                "description": "Control music (play, pause, next, previous).",
+                "parameters": [
+                    "type": "object",
+                    "properties": ["action": ["type": "string"]],
+                    "required": ["action"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "search_and_play_music",
+                "description": "Search and play music.",
+                "parameters": [
+                    "type": "object",
+                    "properties": ["query": ["type": "string"], "search_type": ["type": "string"]],
+                    "required": ["query"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "end_call",
+                "description": "End the call.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "delegate_to_gpt4o",
+                "description": "Delegate complex text tasks.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "prompt": ["type": "string"],
+                        "system": ["type": "string"],
+                        "model": ["type": "string"],
+                        "max_output_tokens": ["type": "integer"]
+                    ],
+                    "required": ["prompt"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "toggle_wifi",
+                "description": "Toggle WiFi.",
+                "parameters": [
+                     "type": "object",
+                     "properties": ["enabled": ["type": "boolean"]],
+                     "required": ["enabled"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "toggle_bluetooth",
+                "description": "Toggle Bluetooth.",
+                "parameters": [
+                     "type": "object",
+                     "properties": ["enabled": ["type": "boolean"]],
+                     "required": ["enabled"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "set_do_not_disturb",
+                "description": "Set Do Not Disturb.",
+                "parameters": [
+                     "type": "object",
+                     "properties": ["enabled": ["type": "boolean"]],
+                     "required": ["enabled"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "set_alarm",
+                "description": "Set alarm.",
+                "parameters": [
+                     "type": "object",
+                     "properties": ["time": ["type": "string"], "label": ["type": "string"]],
+                     "required": ["time"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "get_alarms",
+                "description": "Get alarms.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "take_photo",
+                "description": "Take a photo.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "get_recent_photos",
+                "description": "Get recent photos.",
+                "parameters": [
+                     "type": "object",
+                     "properties": ["count": ["type": "integer"]],
+                     "required": []
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "get_current_location",
+                "description": "Get location.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "get_weather",
+                "description": "Get weather.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "get_playlists",
+                "description": "Get playlists.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "play_playlist",
+                "description": "Play playlist.",
+                "parameters": [
+                     "type": "object",
+                     "properties": ["name": ["type": "string"]],
+                     "required": ["name"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "toggle_shuffle",
+                "description": "Toggle shuffle.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "toggle_repeat",
+                "description": "Toggle repeat.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "create_note",
+                "description": "Create note.",
+                "parameters": [
+                     "type": "object",
+                     "properties": ["title": ["type": "string"], "content": ["type": "string"]],
+                     "required": ["title", "content"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "search_notes",
+                "description": "Search notes.",
+                "parameters": [
+                     "type": "object",
+                     "properties": ["query": ["type": "string"]],
+                     "required": ["query"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "edit_note",
+                "description": "Edit note.",
+                "parameters": [
+                     "type": "object",
+                     "properties": ["note_id": ["type": "string"], "new_content": ["type": "string"]],
+                     "required": ["note_id", "new_content"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "delete_note",
+                "description": "Delete note.",
+                "parameters": [
+                     "type": "object",
+                     "properties": ["note_id": ["type": "string"]],
+                     "required": ["note_id"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "get_all_notes",
+                "description": "Get all notes.",
+                "parameters": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "type": "function",
+                "name": "run_shortcut",
+                "description": "Run shortcut.",
+                "parameters": [
+                     "type": "object",
+                     "properties": ["name": ["type": "string"]],
+                     "required": ["name"]
+                ]
+            ]
+        ]
+    }
     
     // WebRTC references
     private var peerConnection: RTCPeerConnection?
@@ -2891,51 +3293,10 @@ class WebRTCManager: NSObject, ObservableObject {
             self.connectionStatus = .connecting
             
             // Generate tool definitions to pass to Hume
-            // We can reuse the same structure we send to OpenAI, as Hume EVI supports similar tool definitions.
             var tools: [[String: Any]] = []
             
             // 1. Local Tools
-            tools.append(contactSearchTool)
-            tools.append(createCalendarEventTool)
-            tools.append(deleteCalendarEventTool)
-            tools.append(editCalendarEventTool)
-            tools.append(findCalendarEventsTool)
-            tools.append(createReminderTool)
-            tools.append(deleteReminderTool)
-            tools.append(editReminderTool)
-            tools.append(findRemindersTool)
-            tools.append(getDeviceInfoTool)
-            tools.append(getBatteryInfoTool)
-            tools.append(getStorageInfoTool)
-            tools.append(getNetworkInfoTool)
-            tools.append(setBrightnessTool)
-            tools.append(setVolumeTool)
-            tools.append(triggerHapticTool)
-            tools.append(takeScreenshotTool)
-            tools.append(getMusicInfoTool)
-            tools.append(controlMusicTool)
-            tools.append(searchAndPlayMusicTool)
-            tools.append(getPlaylistsTool)
-            tools.append(playPlaylistTool)
-            tools.append(toggleShuffleTool)
-            tools.append(toggleRepeatTool)
-            tools.append(endCallTool)
-            tools.append(delegateToGPT4OTool)
-            tools.append(toggleWiFiTool)
-            tools.append(toggleBluetoothTool)
-            tools.append(setDoNotDisturbTool)
-            tools.append(setAlarmTool)
-            tools.append(getAlarmsTool)
-            tools.append(takePhotoTool)
-            tools.append(getRecentPhotosTool)
-            tools.append(getCurrentLocationTool)
-            tools.append(getWeatherTool)
-            tools.append(createNoteTool)
-            tools.append(searchNotesTool)
-            tools.append(editNoteTool)
-            tools.append(deleteNoteTool)
-            tools.append(getAllNotesTool)
-            tools.append(runShortcutTool)
+            tools.append(contentsOf: getLocalTools())
             
             // 2. MCP Tools
             tools.append(contentsOf: mcpTools)
@@ -3119,106 +3480,21 @@ class WebRTCManager: NSObject, ObservableObject {
             "tool_choice": "auto"  // Let model decide when to use tools
         ]
         
-        // Prepare tools array
         var allTools: [[String: Any]] = []
         
-        // Add local contact search tool
-        allTools.append(contactSearchTool)
-        
-        // Add local calendar creation tool
-        allTools.append(createCalendarEventTool)
-        allTools.append(deleteCalendarEventTool)
-        allTools.append(editCalendarEventTool)
-        allTools.append(findCalendarEventsTool)
-        
-        // Add reminder creation tool
-        allTools.append(createReminderTool)
-        allTools.append(deleteReminderTool)
-        allTools.append(editReminderTool)
-        allTools.append(findRemindersTool)
-        
-        // Add Device Information Tools
-        allTools.append(getDeviceInfoTool)
-        allTools.append(getBatteryInfoTool)
-        allTools.append(getStorageInfoTool)
-        allTools.append(getNetworkInfoTool)
-        
-        // Add System Control Tools
-        allTools.append(setBrightnessTool)
-        allTools.append(setVolumeTool)
-        allTools.append(triggerHapticTool)
-        allTools.append(takeScreenshotTool)
-        
-        // Add Media Control Tools
-        allTools.append(getMusicInfoTool)
-        allTools.append(controlMusicTool)
-        allTools.append(searchAndPlayMusicTool)
-        
-        allTools.append(endCallTool)
-
-        allTools.append(delegateToGPT4OTool)
-
-        // Add System Control Tools
-        allTools.append(toggleWiFiTool)
-        allTools.append(toggleBluetoothTool)
-        
-        allTools.append(setDoNotDisturbTool)
-        
-        // Add Alarm Management Tools
-        allTools.append(setAlarmTool)
-        allTools.append(getAlarmsTool)
-        
-        // Add Camera & Photo Tools
-        allTools.append(takePhotoTool)
-        allTools.append(getRecentPhotosTool)
-        
-        // Add Weather & Location Tools
-        allTools.append(getCurrentLocationTool)
-        allTools.append(getWeatherTool)
-        
-        // Add Enhanced Media Control Tools
-        allTools.append(getPlaylistsTool)
-        allTools.append(playPlaylistTool)
-        allTools.append(toggleShuffleTool)
-        allTools.append(toggleRepeatTool)
-        
-        // Add Notes Integration Tools
-        allTools.append(createNoteTool)
-        allTools.append(searchNotesTool)
-        allTools.append(editNoteTool)
-        allTools.append(deleteNoteTool)
-        allTools.append(getAllNotesTool)
-        
-        // Add Shortcuts Integration Tools
-        allTools.append(runShortcutTool)
+        // Add Local Tools
+        allTools.append(contentsOf: getLocalTools())
         
         // Add MCP tools if configured
         allTools.append(contentsOf: mcpTools)
         
         if !allTools.isEmpty {
             sessionConfig["tools"] = allTools
-            print("🔧 Adding \(allTools.count) tools to session:")
-            print("   - 1 local contact search function")
-            print("   - 4 local calendar functions (create, delete, edit, find)")
-            print("   - 4 local reminder functions (create, delete, edit, find)")
-            print("   - 4 device information functions (device, battery, storage, network)")
-            print("   - 4 system control functions (brightness, volume, haptic, screenshot)")
-            print("   - 7 media control functions (music info, control, search, playlists, shuffle, repeat)")
-            print("   - 4 system toggle functions (wifi, bluetooth, network info, do not disturb)")
-            print("   - 2 alarm management functions (set, get)")
-            print("   - 2 camera/photo functions (take photo, recent photos)")
-            print("   - 2 location/weather functions (location, weather)")
-            print("   - 2 notes functions (create, search)")
-            print("   - 1 shortcuts function (run shortcut)")
-            print("   - 1 call control function (end call)")
-            print("   - \(mcpTools.count) MCP tools")
-            print("🔧 Contact search tool definition: \(contactSearchTool)")
-            print("🔧 Calendar creation tool definition: \(createCalendarEventTool)")
-            print("🔧 Reminder creation tool definition: \(createReminderTool)")
-            print("🔧 Device info tool definition: \(getDeviceInfoTool)")
-            print("🔧 System control tool definition: \(setBrightnessTool)")
-            print("🔧 Media control tool definition: \(getMusicInfoTool)")
+            print("🔧 Adding \(allTools.count) tools to session configuration.")
         }
+        
+        // 3. Send session.update
+        // ... rest of the function ...
         
         let sessionUpdate: [String: Any] = [
             "type": "session.update",
