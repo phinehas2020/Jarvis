@@ -145,10 +145,31 @@ final class GeminiLiveClient: NSObject {
 
         // Start with minimal setup - just model and config
         let modelName = model.hasPrefix("models/") ? model : "models/\(model)"
-        let message: [String: Any] = [
-            "setup": [
-                "model": modelName
+        
+        var setupDict: [String: Any] = [
+            "model": modelName,
+            "generationConfig": [
+                "responseModalities": ["AUDIO"],
+                "speechConfig": [
+                    "voiceConfig": [
+                        "prebuiltVoiceConfig": [
+                            "voiceName": "Puck"
+                        ]
+                    ]
+                ]
             ]
+        ]
+        
+        if !systemPrompt.isEmpty {
+            setupDict["systemInstruction"] = [
+                "parts": [
+                    ["text": systemPrompt]
+                ]
+            ]
+        }
+        
+        let message: [String: Any] = [
+            "setup": setupDict
         ]
 
         print("📤 Sending minimal setup message for model: \(model)")
