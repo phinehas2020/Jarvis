@@ -119,9 +119,41 @@ class HumeClient: NSObject {
         delegate?.humeClient(self, didChangeStatus: .connected)
         
         receiveMessage()
-        startAudio()
         
-        // Send initial session settings if needed
+        // 1. Send session settings first
+        sendSessionSettings()
+        
+        // 2. Start audio capture only after connection is established
+        startAudio()
+    }
+    
+    private func sendSessionSettings() {
+        // Configure for typical iOS mic input: 44.1kHz or 48kHz.
+        // Hume processes raw audio (Linear PCM).
+        // Sending session_settings is best practice.
+        let settings: [String: Any] = [
+            "type": "session_settings",
+            "audio": [
+                "encoding": "linear16",
+                "sample_rate": 44100, // We will request 44.1kHz from engine
+                "channels": 1
+            ],
+            "context": [
+                "text": "You are a helpful AI assistant."
+            ]
+        ]
+        
+        if let jsonData = try? JSONSerialization.data(withJSONObject: settings),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            let message = URLSessionWebSocketTask.Message.string(jsonString)
+            webSocketTask?.send(message) { error in
+                if let error = error {
+                    print("❌ Failed to send session settings: \(error)")
+                } else {
+                    print("✅ Hume session settings sent")
+                }
+            }
+        }
     }
     
     private func receiveMessage() {
@@ -211,11 +243,13 @@ class HumeClient: NSObject {
         inputNode = audioEngine.inputNode
         let inputFormat = inputNode?.outputFormat(forBus: 0)
         
-        // Install tap on input node to capture audio
-        // Hume expects: Linear PCM, 16-bit, mono/stereo (usually 44.1 or 48kHz is fine, will be resampled)
-        // We'll send raw bytes encoded in Base64 via JSON "audio_input" message
+        // Target format: 44.1kHz, mono, Int16 (Hume expects Linear PCM 16-bit)
+        // We will tap the node, then downconvert/upconvert if needed in processAudioInput
+        // For simplicity, we just use the native hardware format but ensure we cast to Int16
         
-        inputNode?.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] (buffer, time) in
+        // Note: installTap gives us Float32 buffers usually. We MUST convert to Int16 before sending to Hume.
+        
+        inputNode?.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] (buffer, time) in
             self?.processAudioInput(buffer: buffer)
         }
         
@@ -244,8 +278,10 @@ class HumeClient: NSObject {
     private func processAudioInput(buffer: AVAudioPCMBuffer) {
         guard isConnected, let webSocketTask = webSocketTask else { return }
         
-        // Convert buffer to Data (PCM 16-bit little endian usually preferred)
-        let audioData = buffer.toData()
+        // Convert Float32 buffer (standard iOS mic) to Int16 for Hume
+        guard let pcmBuffer = convertToPCMInt16(buffer: buffer) else { return }
+        
+        let audioData = pcmBuffer.toData()
         let base64 = audioData.base64EncodedString()
         
         let message: [String: Any] = [
@@ -278,6 +314,32 @@ class HumeClient: NSObject {
                 playerNode?.play()
             }
         }
+    }
+    // Convert typical Float32 buffers to Int16 for streaming
+    private func convertToPCMInt16(buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        let format = buffer.format
+        // If already int16, return strictly
+        if format.commonFormat == .pcmFormatInt16 {
+            return buffer
+        }
+        
+        // Targeted format: Same sample rate, same channels, but Int16
+        guard let targetFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: format.sampleRate, channels: format.channelCount, interleaved: false) else { return nil }
+        
+        guard let converter = AVAudioConverter(from: format, to: targetFormat) else { return nil }
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: buffer.frameLength) else { return nil }
+        
+        var error: NSError? = nil
+        let status = converter.convert(to: outputBuffer, error: &error) { packetCount, outStatus in
+            outStatus.pointee = .haveData
+            return buffer
+        }
+        
+        if status == .error || error != nil {
+            return nil
+        }
+        
+        return outputBuffer
     }
 }
 
