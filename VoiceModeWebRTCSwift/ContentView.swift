@@ -16,7 +16,7 @@ struct ContentView: View {
     // AppStorage properties
     @AppStorage("apiKey") private var apiKey = API_KEY
     @AppStorage("customMcpEnabled") private var customMcpEnabled = true
-    @AppStorage("customMcpServerUrl") private var customMcpServerUrl = "https://imessage.phinehasadams.com/mcp"
+    @AppStorage("customMcpServerUrl") private var customMcpServerUrl = ""
     @AppStorage("customMcpServerLabel") private var customMcpServerLabel = "bluebubbles"
     @AppStorage("customMcpAuthToken") private var customMcpAuthToken = ""
     @AppStorage("systemMessage") private var systemMessage = ""
@@ -44,6 +44,10 @@ struct ContentView: View {
             Always inform users that the Notes app will open for them to complete the action.
             
             iMessage via MCP (BlueBubbles) is how we send messages
+
+            IMPORTANT UPDATE (2025-12):
+            - This setup uses the newer MCP bridge exposing only: `send_imessage`, `fetch_messages`, `get_status`.
+            - The legacy `bluebubbles_*` tools and `/api/v1/chat/new` workflow are not available. Ignore any legacy instructions below and use the new tools instead.
             
             1. Available tools (and when to use each)
             1. bluebubbles_health
@@ -281,14 +285,13 @@ struct ContentView: View {
             Call bluebubbles_request → POST /api/v1/chat/new with addresses + message to create chat and send the message in one go.
             For any follow‑up messages in the same conversational context, reuse the same chatGuid instead of re‑searching.
             ## BlueBubbles MCP (Messaging)
-            - All messaging goes through the BlueBubbles MCP server hosted at `https://imessage.phinehasadams.com/mcp`.
-            - Available tools: `bluebubbles_health`, `bluebubbles_list_chats`, `bluebubbles_get_messages`, `bluebubbles_send_message`, `bluebubbles_create_chat`, `bluebubbles_get_attachment`, `bluebubbles_send_attachment`, `bluebubbles_edit_message`, `bluebubbles_unsend_message`, `bluebubbles_notify_message`, `bluebubbles_get_attachment_blurhash`, `bluebubbles_get_attachment_live_photo`, `bluebubbles_request`.
-            - Before using the bridge (or when connection issues are suspected) call `bluebubbles_health`.
-            - When the user asks to “test” messaging, send the literal text `test` to `+1 254 327 5329` (chat GUID `iMessage;-;+12543275329`) via `bluebubbles_send_message` and confirm the result.
-            - Use `bluebubbles_list_chats` to locate conversations by keyword; if no chat is found, ask the user for the phone number or Apple ID and send directly with `bluebubbles_send_message`.
-            - Use `bluebubbles_get_messages` for transcripts, `bluebubbles_send_attachment` for base64 file uploads, `bluebubbles_edit_message` / `bluebubbles_unsend_message` / `bluebubbles_notify_message` for follow-up actions, `bluebubbles_get_attachment_blurhash` for quick previews, `bluebubbles_get_attachment_live_photo` for Live Photos, and `bluebubbles_request` for any custom REST endpoint.
+            - All messaging goes through the BlueBubbles MCP server configured in Settings.
+            - Available tools: `send_imessage`, `fetch_messages`, `get_status`.
+            - For sending: resolve a valid E.164 number / Apple ID, then call `send_imessage`.
+            - For reading messages: call `fetch_messages` with `handle`/`chatGuid`/`since`/`limit` as appropriate.
+            - Use `get_status` if connection or quiet-hours issues are suspected.
             - You cannot see contact names—always ask the user for a number/email unless they already provided it.
-            - Confirm tool responses: treat success only when you get HTTP 200/`status: 200`; explain and offer retries on errors.
+            - Confirm tool responses: treat success only when you get `{ ok: true, status: 200 }`; explain and offer retries on errors.
             Contacts Integration (summary rules)
             
             MANDATORY when the user uses a name (“Sweetheart”, “Mom”, etc.):
@@ -395,19 +398,9 @@ struct ContentView: View {
     ]
     private let voiceOptions = ["echo", "ash", "ballad", "coral", "sage", "shimmer", "verse"]
     private let bluebubblesToolNames = [
-        "bluebubbles_health",
-        "bluebubbles_list_chats",
-        "bluebubbles_get_messages",
-        "bluebubbles_send_message",
-        "bluebubbles_create_chat",
-        "bluebubbles_get_attachment",
-        "bluebubbles_send_attachment",
-        "bluebubbles_edit_message",
-        "bluebubbles_unsend_message",
-        "bluebubbles_notify_message",
-        "bluebubbles_get_attachment_blurhash",
-        "bluebubbles_get_attachment_live_photo",
-        "bluebubbles_request"
+        "send_imessage",
+        "fetch_messages",
+        "get_status"
     ]
     
     // Check if current model supports vision

@@ -134,7 +134,7 @@ tunnel: YOUR_TUNNEL_ID_HERE
 credentials-file: /Users/YOUR_USERNAME/.cloudflared/YOUR_TUNNEL_ID_HERE.json
 
 ingress:
-  - hostname: imessage.phinehasadams.com
+  - hostname: <your-imessage-hostname>
     service: http://localhost:3000
   - service: http_status:404
 EOF
@@ -143,13 +143,13 @@ EOF
 **Replace:**
 - `YOUR_TUNNEL_ID_HERE` with your actual tunnel ID
 - `YOUR_USERNAME` with your macOS username
-- `imessage.phinehasadams.com` with your desired subdomain
+- `<your-imessage-hostname>` with your desired subdomain
 
 ## Step 10: Set Up DNS
 
 ```bash
 # Create DNS record pointing to your tunnel
-cloudflared tunnel route dns imessage-bridge imessage.phinehasadams.com
+cloudflared tunnel route dns imessage-bridge <your-imessage-hostname>
 ```
 
 ## Step 11: Install pm2 for Process Management
@@ -184,7 +184,7 @@ pm2 logs imessage-bridge
 pm2 logs cloudflare-tunnel
 
 # Test from the internet
-curl -X POST https://imessage.phinehasadams.com/mcp \
+curl -X POST https://<your-imessage-hostname>/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_TOKEN_HERE" \
   -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
@@ -226,8 +226,7 @@ Once everything is running, configure the Jarvis iOS app:
 1. Open Jarvis app > Settings
 2. Enable "Custom MCP Server"
 3. Server Label: `bluebubbles`
-4. Server URL: `https://imessage.phinehasadams.com/mcp`
+4. Server URL: `https://<your-imessage-hostname>/mcp`
 5. Auth Token: Your `MCP_BEARER_TOKEN` value
 
 Test by asking Jarvis to "send a test message to [phone number]"
-

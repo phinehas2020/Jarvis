@@ -1,9 +1,10 @@
 import asyncio
 import websockets
 import json
+import os
 
 async def test_websocket():
-    uri = "wss://imessage.phinehasadams.com/mcp?token=6zXYRXIQcZHKOo__2sImBYqgj3yktutHR9B6OSk2Y4Y"
+    uri = os.getenv("MCP_URL", "wss://YOUR_MCP_HOST/mcp?token=YOUR_TOKEN")
     headers = {
         "Sec-WebSocket-Protocol": "mcp"
     }
@@ -11,10 +12,10 @@ async def test_websocket():
         async with websockets.connect(uri, extra_headers=headers, subprotocols=["mcp"]) as websocket:
             print("Connection successful!")
             
-            # Send a list_tools RPC request
+            # Send a tools/list RPC request
             list_tools_request = {
                 "jsonrpc": "2.0",
-                "method": "list_tools",
+                "method": "tools/list",
                 "id": 1
             }
             await websocket.send(json.dumps(list_tools_request))
