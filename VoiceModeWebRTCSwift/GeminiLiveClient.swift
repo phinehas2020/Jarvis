@@ -408,6 +408,12 @@ final class GeminiLiveClient: NSObject {
     private func processAudioInput(buffer: AVAudioPCMBuffer) {
         guard isConnected else { return }
 
+        // Debug RMS levels occasionally
+        if audioChunkCounter % 100 == 0 {
+            let rms = listAudioLevels(buffer)
+            print("🎤 Audio Input RMS: \(rms)")
+        }
+
         if let playerNode, playerNode.isPlaying {
             return
         }
