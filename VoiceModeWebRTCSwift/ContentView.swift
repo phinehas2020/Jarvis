@@ -122,12 +122,12 @@ struct ContentView: View {
             “Play Bohemian Rhapsody” → Use music search/play tools.
             “Create a reminder for tomorrow” → Use create_reminder (Reminders app).
             “Create a note with my ideas” → Use create_note (Notes app; explain Notes will open).
-	            “Text Mom saying I’ll be late” →
-	            Search contacts for “Mom”.
-	            If one match, send immediately to their mobile.
-	            Normalize the number and call `send_imessage` with the user’s text.
-	            Remember: You are having a conversation, not just executing commands. Be helpful, explain your actions, and always confirm what you’ve done.
-	            """
+            “Text Mom saying I’ll be late” →
+            Search contacts for “Mom”.
+            If one match, send immediately to their mobile.
+            Normalize the number and call `send_imessage` with the user’s text.
+            Remember: You are having a conversation, not just executing commands. Be helpful, explain your actions, and always confirm what you’ve done.
+            """
     }
     
     // Initialize system message from file
@@ -148,7 +148,6 @@ struct ContentView: View {
     @AppStorage("selectedModel") private var selectedModel = "gpt-realtime"
     @AppStorage("selectedVoice") private var selectedVoice = "echo"
     @AppStorage("showTextOutput") private var showTextOutput = true
-    @AppStorage("humeApiKey") private var humeApiKey = ""
     @AppStorage("selectedProviderRaw") private var selectedProviderRaw = "OpenAI Realtime" // Default to OpenAI
     
     private var selectedProvider: WebRTCManager.VoiceProvider {
