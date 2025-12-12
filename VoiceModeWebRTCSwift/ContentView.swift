@@ -17,6 +17,7 @@ struct ContentView: View {
     @AppStorage("apiKey") private var apiKey = API_KEY
     @AppStorage("geminiApiKey") private var geminiApiKey = ""
     @AppStorage("geminiModel") private var geminiModel = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+    @AppStorage("didMigrateGeminiModelDefault") private var didMigrateGeminiModelDefault = false
     @AppStorage("geminiLiveEndpoint") private var geminiLiveEndpoint = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
     @AppStorage("customMcpEnabled") private var customMcpEnabled = true
     @AppStorage("customMcpServerUrl") private var customMcpServerUrl = ""
@@ -137,6 +138,20 @@ struct ContentView: View {
             systemMessage = loadSystemPrompt()
         }
     }
+
+    private func migrateGeminiModelIfNeeded() {
+        guard !didMigrateGeminiModelDefault else { return }
+        didMigrateGeminiModelDefault = true
+
+        let trimmed = geminiModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyModels = Set([
+            "models/gemini-2.0-flash-exp",
+            "gemini-2.0-flash-exp"
+        ])
+        guard legacyModels.contains(trimmed) else { return }
+
+        geminiModel = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+    }
     
     private func sanitizedServerLabel(_ raw: String) -> String {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
@@ -251,6 +266,7 @@ struct ContentView: View {
         }
         .onAppear {
             initializeSystemMessage()
+            migrateGeminiModelIfNeeded()
             requestMicrophonePermission()
             webrtcManager.requestCalendarPermission()
         }

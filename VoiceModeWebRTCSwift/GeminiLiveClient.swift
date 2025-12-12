@@ -225,7 +225,6 @@ final class GeminiLiveClient: NSObject {
 
         let message: [String: Any] = [
             "clientContent": [
-                "turns": [],
                 "turnComplete": true
             ]
         ]
@@ -242,6 +241,7 @@ final class GeminiLiveClient: NSObject {
         webSocketTask.send(.string(jsonString)) { [weak self] error in
             guard let self else { return }
             if let nsError = error as NSError? {
+                print("❌ Gemini Live send error: \(nsError.localizedDescription) (domain: \(nsError.domain) code: \(nsError.code))")
                 if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 {
                     self.teardownConnection(notify: true)
                     return
