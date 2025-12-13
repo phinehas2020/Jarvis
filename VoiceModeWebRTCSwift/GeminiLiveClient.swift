@@ -105,16 +105,9 @@ final class GeminiLiveClient: NSObject {
         let endpoint = remainingEndpointCandidates.removeFirst()
         currentEndpointAttempt = endpoint
 
-        // Append API key as query parameter
-        var urlString = endpoint
-        if !apiKey.isEmpty {
-            let separator = endpoint.contains("?") ? "&" : "?"
-            urlString = "\(endpoint)\(separator)key=\(apiKey)"
-        }
+        print("🔌 Gemini Live WS connecting: \(endpoint)")
 
-        print("🔌 Gemini Live WS connecting: \(redactApiKey(urlString))")
-
-        guard let url = URL(string: urlString) else {
+        guard let url = URL(string: endpoint) else {
             connectNextEndpoint()
             return
         }
@@ -126,6 +119,12 @@ final class GeminiLiveClient: NSObject {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
+        
+        // Gemini Live API requires API key in header, not query parameter
+        if !apiKey.isEmpty {
+            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+            print("🔑 Using header-based authentication (x-goog-api-key)")
+        }
 
         webSocketTask = session.webSocketTask(with: request)
         webSocketTask?.resume()
@@ -921,18 +920,17 @@ final class GeminiLiveClient: NSObject {
             urlString = "http://" + String(urlString.dropFirst("ws://".count))
         }
 
-        // Append API key as query parameter
-        if !apiKey.isEmpty {
-            let separator = urlString.contains("?") ? "&" : "?"
-            urlString = "\(urlString)\(separator)key=\(apiKey)"
-        }
-
         guard let url = URL(string: urlString) else { return }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "accept")
+        
+        // Gemini Live API requires API key in header
+        if !apiKey.isEmpty {
+            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        }
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let http = response as? HTTPURLResponse {
