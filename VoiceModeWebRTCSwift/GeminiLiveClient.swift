@@ -39,9 +39,9 @@ final class GeminiLiveClient: NSObject {
     private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
     private let maximumMicGain: Float = 10.0
-    private let vadSpeechRmsThreshold: Float = 0.02
-    private let vadContinueRmsThreshold: Float = 0.015
-    private let vadSilenceDurationSeconds: TimeInterval = 0.75
+    private let vadSpeechRmsThreshold: Float = 0.012  // Lower for iPhone mics (was 0.02)
+    private let vadContinueRmsThreshold: Float = 0.008  // Lower for quiet rooms (was 0.015)
+    private let vadSilenceDurationSeconds: TimeInterval = 0.4  // Faster response (was 0.75)
     private var vadHasDetectedSpeechInCurrentTurn: Bool = false
     private var vadSilenceBeganUptime: TimeInterval?
     private var nextRmsLogUptime: TimeInterval = 0
@@ -139,9 +139,9 @@ final class GeminiLiveClient: NSObject {
         guard !trimmed.isEmpty else { return }
 
         guard isConnected else { return }
-        isAwaitingModelResponse = true
 
-        let message: [String: Any] = [
+        // Send turn content first
+        let turnMessage: [String: Any] = [
             "clientContent": [
                 "turns": [
                     [
@@ -150,30 +150,33 @@ final class GeminiLiveClient: NSObject {
                             ["text": trimmed]
                         ]
                     ]
-                ],
+                ]
+            ]
+        ]
+        sendJSON(turnMessage)
+        
+        // Then send turn complete separately
+        let completeMessage: [String: Any] = [
+            "clientContent": [
                 "turnComplete": true
             ]
         ]
-
-        sendJSON(message)
+        sendJSON(completeMessage)
+        
+        isAwaitingModelResponse = true
     }
 
     private func sendSetup() {
         guard isConnected else { return }
 
-        // Start with minimal setup - just model and config
+        // Gemini Live requires realtimeConfig, not generationConfig
         let modelName = model.hasPrefix("models/") ? model : "models/\(model)"
         
         var setupDict: [String: Any] = [
             "model": modelName,
-            "generationConfig": [
-                "responseModalities": ["TEXT", "AUDIO"],  // Include both TEXT and AUDIO modalities
-                "speechConfig": [
-                    "voiceConfig": [
-                        "prebuiltVoiceConfig": [
-                            "voiceName": "Puck"
-                        ]
-                    ]
+            "realtimeConfig": [
+                "responseAudio": [
+                    "voice": "Puck"
                 ]
             ]
         ]
@@ -190,7 +193,8 @@ final class GeminiLiveClient: NSObject {
             "setup": setupDict
         ]
 
-        print("📤 Sending minimal setup message for model: \(model)")
+        print("📤 Sending Gemini Live setup with realtimeConfig")
+        print("📤 Model: \(model)")
         print("📤 Setup JSON: \(String(data: try! JSONSerialization.data(withJSONObject: message), encoding: .utf8) ?? "error")")
         sendJSON(message)
     }
@@ -678,7 +682,7 @@ final class GeminiLiveClient: NSObject {
             vadSilenceBeganUptime = nil
 
             guard !isAwaitingModelResponse else { return }
-            isAwaitingModelResponse = true
+            
             if let start = currentTurnStartUptime {
                 let duration = ProcessInfo.processInfo.systemUptime - start
                 print("🎤 Ending speech turn (\(currentTurnAudioChunksSent) chunks, \(currentTurnAudioBytesSent) bytes, ~\(String(format: "%.2f", duration))s)")
@@ -688,7 +692,11 @@ final class GeminiLiveClient: NSObject {
             currentTurnStartUptime = nil
             currentTurnAudioChunksSent = 0
             currentTurnAudioBytesSent = 0
+            
+            // CRITICAL: Send audioStreamEnd BEFORE setting awaiting flag
+            // Otherwise the guard in sendAudioStreamEnd will block it
             sendAudioStreamEnd()
+            isAwaitingModelResponse = true
         }
     }
 
