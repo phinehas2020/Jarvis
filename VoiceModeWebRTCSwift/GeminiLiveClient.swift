@@ -867,14 +867,29 @@ final class GeminiLiveClient: NSObject {
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let http = response as? HTTPURLResponse {
-                let bodyPreview: String
+                var bodyPreview: String = "<no data>"
+                
                 if let data, !data.isEmpty {
-                    let prefix = data.prefix(2048)
+                    // Try to decompress if gzipped
+                    var decodedData = data
+                    if let contentEncoding = http.allHeaderFields["Content-Encoding"] as? String,
+                       contentEncoding.lowercased().contains("gzip") {
+                        // Data might be gzipped - try to decompress
+                        do {
+                            decodedData = try (data as NSData).decompressed(using: .zlib) as Data
+                            print("🔎 Decompressed gzipped response: \(decodedData.count) bytes")
+                        } catch {
+                            print("🔎 Could not decompress gzip: \(error)")
+                        }
+                    }
+                    
+                    let prefix = decodedData.prefix(2048)
                     bodyPreview = String(data: prefix, encoding: .utf8) ?? "<non-utf8 body \(prefix.count) bytes>"
-                } else {
-                    bodyPreview = "<empty body>"
                 }
-                print("🔎 Gemini Live probe HTTP \(http.statusCode) for \(urlString): \(bodyPreview)")
+                
+                print("🔎 Gemini Live probe HTTP \(http.statusCode)")
+                print("🔎 Headers: \(http.allHeaderFields)")
+                print("🔎 Body: \(bodyPreview)")
             } else if let error {
                 print("🔎 Gemini Live probe failed for \(urlString): \(error.localizedDescription)")
             }
