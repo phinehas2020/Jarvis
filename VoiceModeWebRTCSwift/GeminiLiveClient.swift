@@ -344,7 +344,8 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func handleMessage(_ text: String) {
-        print("📥 Received Gemini Live message: \(text.prefix(400))...")
+        print("📥 Received Gemini Live message (\(text.count) chars)")
+        print("📥 Full message: \(text)")
         
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -363,11 +364,21 @@ final class GeminiLiveClient: NSObject {
 
         // Handle errors
         if let error = json["error"] as? [String: Any] {
+            let code = error["code"] as? Int ?? -1
             let message = (error["message"] as? String) ?? "Gemini Live error"
-            print("❌ Gemini Live error: \(message)")
+            let status = error["status"] as? String ?? "UNKNOWN"
+            print("❌ Gemini Live API error:")
+            print("   Code: \(code)")
+            print("   Status: \(status)")
+            print("   Message: \(message)")
+            print("   Full error: \(error)")
             delegate?.geminiLiveClient(
                 self,
-                didEncounterError: NSError(domain: "GeminiLiveClient", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
+                didEncounterError: NSError(domain: "GeminiLiveClient", code: code, userInfo: [
+                    NSLocalizedDescriptionKey: message,
+                    "status": status,
+                    "fullError": error
+                ])
             )
             return
         }
@@ -982,17 +993,23 @@ extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         guard session === urlSession, webSocketTask === self.webSocketTask else { return }
         let reasonString = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "no reason"
-        print("🔌 Gemini Live WebSocket closed: code=\(closeCode.rawValue), reason=\(reasonString)")
+        
+        print(String(repeating: "=", count: 60))
+        print("🔌 WEBSOCKET CLOSED")
+        print("   Close Code: \(closeCode.rawValue)")
+        print("   Reason: \(reasonString)")
         
         // Log additional details for debugging
         if let reason = reason, !reason.isEmpty {
-            print("🔍 Close reason bytes: \(reason as NSData)")
+            print("   Reason bytes: \(reason.map { String(format: "%02x", $0) }.joined(separator: " "))")
+            print("   Reason data: \(reason as NSData)")
         }
         
         // Check if this is an abnormal closure
         if closeCode == .abnormalClosure || closeCode == .internalServerError {
-            print("⚠️ Abnormal closure detected - server may have rejected the connection")
+            print("   ⚠️ ABNORMAL CLOSURE - server rejected connection")
         }
+        print(String(repeating: "=", count: 60))
         
         // If we haven't successfully established a session (or just connected and closed), try next candidate
         if !remainingEndpointCandidates.isEmpty {
