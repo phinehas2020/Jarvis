@@ -3279,7 +3279,7 @@ class WebRTCManager: NSObject, ObservableObject {
                 let errorItem = ConversationItem(
                     id: UUID().uuidString,
                     role: "system",
-                    text: "Error: Gemini model is required (e.g. models/gemini-2.0-flash-exp)."
+                    text: "Error: Gemini model is required (e.g. models/gemini-live-2.5-flash-preview)."
                 )
                 DispatchQueue.main.async {
                     self.conversation.append(errorItem)
