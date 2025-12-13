@@ -37,6 +37,7 @@ final class GeminiLiveClient: NSObject {
 
     private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
+    private let maximumMicGain: Float = 10.0
     private let vadSpeechRmsThreshold: Float = 0.02
     private let vadContinueRmsThreshold: Float = 0.015
     private let vadSilenceDurationSeconds: TimeInterval = 0.75
@@ -497,30 +498,52 @@ final class GeminiLiveClient: NSObject {
         guard isConnected else { return }
         guard isReadyForAudio else { return }
 
-        // Apply digital gain (10x) to boost generic mic input without excessive noise
-        if let floatData = buffer.floatChannelData?[0] {
-            let frames = Int(buffer.frameLength)
-            for i in 0..<frames {
-                floatData[i] = min(1.0, max(-1.0, floatData[i] * 10.0))
-            }
-        }
-
-        let rms = listAudioLevels(buffer)
+        // IMPORTANT: Compute RMS pre-gain for VAD; boosting/clamping can prevent silence detection.
+        let rawRms = listAudioLevels(buffer)
 
         // Debug RMS levels (every ~2 seconds)
         let now = ProcessInfo.processInfo.systemUptime
         if now >= nextRmsLogUptime {
             nextRmsLogUptime = now + 2.0
-            print("🎤 Audio Input RMS: \(rms) (boosted 10x)")
+            print("🎤 Audio Input RMS: \(rawRms) (raw)")
         }
 
         if isAwaitingModelResponse || isPlayingAssistantAudio() {
             return
         }
 
-        updateTurnDetection(rms: rms)
+        updateTurnDetection(rms: rawRms)
         if isAwaitingModelResponse {
             return
+        }
+
+        // Only send microphone audio once VAD considers us "in speech" for this turn.
+        guard vadHasDetectedSpeechInCurrentTurn else { return }
+
+        // Apply microphone gain with a simple limiter to avoid clipping.
+        if let channelData = buffer.floatChannelData {
+            let frames = Int(buffer.frameLength)
+            let channels = Int(buffer.format.channelCount)
+
+            var maxAbs: Float = 0
+            for channelIndex in 0..<channels {
+                let samples = channelData[channelIndex]
+                for frameIndex in 0..<frames {
+                    maxAbs = max(maxAbs, abs(samples[frameIndex]))
+                }
+            }
+
+            if maxAbs > 0 {
+                let limitedGain = min(maximumMicGain, 0.99 / maxAbs)
+                if limitedGain > 1.0 {
+                    for channelIndex in 0..<channels {
+                        let samples = channelData[channelIndex]
+                        for frameIndex in 0..<frames {
+                            samples[frameIndex] *= limitedGain
+                        }
+                    }
+                }
+            }
         }
 
         if let converter = audioConverter,
