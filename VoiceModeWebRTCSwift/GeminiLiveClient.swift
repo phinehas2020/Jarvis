@@ -31,7 +31,7 @@ final class GeminiLiveClient: NSObject {
     private let playbackStateLock = NSLock()
     private var pendingPlaybackBuffers: Int = 0
 
-    private let desiredInputSampleRate: Double = 16000
+    private let desiredInputSampleRate: Double = 24000
     private var audioConverter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
     private var converterOutputFormat: AVAudioFormat?
@@ -43,7 +43,7 @@ final class GeminiLiveClient: NSObject {
     private let vadContinueRmsThreshold: Float = 0.015
     private let vadSilenceDurationSeconds: TimeInterval = 0.75
     private var vadHasDetectedSpeechInCurrentTurn: Bool = false
-    private var didStartClientContentTurnForCurrentAudioTurn: Bool = false
+    private var didSendActivityStartForCurrentTurn: Bool = false
     private var vadSilenceBeganUptime: TimeInterval?
     private var nextRmsLogUptime: TimeInterval = 0
     private var currentTurnStartUptime: TimeInterval?
@@ -166,6 +166,11 @@ final class GeminiLiveClient: NSObject {
         
         var setupDict: [String: Any] = [
             "model": modelName,
+            "realtimeInputConfig": [
+                "automaticActivityDetection": [
+                    "disabled": true
+                ]
+            ],
             "generationConfig": [
                 "responseModalities": ["AUDIO"],
                 "speechConfig": [
@@ -179,11 +184,7 @@ final class GeminiLiveClient: NSObject {
         ]
         
         if !systemPrompt.isEmpty {
-            setupDict["systemInstruction"] = [
-                "parts": [
-                    ["text": systemPrompt]
-                ]
-            ]
+            setupDict["systemInstruction"] = systemPrompt
         }
         
         let message: [String: Any] = [
@@ -225,11 +226,9 @@ final class GeminiLiveClient: NSObject {
             let base64 = pcmDataToSend.base64EncodedString()
             let message: [String: Any] = [
                 "realtimeInput": [
-                    "mediaChunks": [
-                        [
-                            "mimeType": "audio/pcm;rate=\(sampleRateToSend)",
-                            "data": base64
-                        ]
+                    "audio": [
+                        "mimeType": "audio/pcm;rate=\(sampleRateToSend)",
+                        "data": base64
                     ]
                 ]
             ]
@@ -237,15 +236,17 @@ final class GeminiLiveClient: NSObject {
         }
     }
 
-    private func sendTurnComplete() {
+    private func sendActivityStart() {
         guard isConnected else { return }
         guard isReadyForAudio else { return }
 
-        if didStartClientContentTurnForCurrentAudioTurn {
-            didStartClientContentTurnForCurrentAudioTurn = false
-        } else {
-            print("⚠️ Ending audio turn without a prior clientContent start")
-        }
+        print("📤 Sending activityStart")
+        sendJSON(["realtimeInput": ["activityStart": [:]]])
+    }
+
+    private func sendActivityEnd() {
+        guard isConnected else { return }
+        guard isReadyForAudio else { return }
 
         if let start = currentTurnStartUptime {
             let duration = ProcessInfo.processInfo.systemUptime - start
@@ -257,36 +258,9 @@ final class GeminiLiveClient: NSObject {
         currentTurnAudioChunksSent = 0
         currentTurnAudioBytesSent = 0
 
-        let message: [String: Any] = [
-            "clientContent": [
-                "turnComplete": true
-            ]
-        ]
-        print("📤 Sending turnComplete (clientContent)")
-        sendJSON(message)
-    }
-
-    private func startAudioTurnIfNeeded() {
-        guard isConnected else { return }
-        guard isReadyForAudio else { return }
-        guard !isAwaitingModelResponse else { return }
-        guard !didStartClientContentTurnForCurrentAudioTurn else { return }
-
-        didStartClientContentTurnForCurrentAudioTurn = true
-        let message: [String: Any] = [
-            "clientContent": [
-                "turns": [
-                    [
-                        "role": "user",
-                        "parts": [
-                            ["text": " "]
-                        ]
-                    ]
-                ]
-            ]
-        ]
-        print("📤 Starting audio turn (clientContent)")
-        sendJSON(message)
+        print("📤 Sending activityEnd")
+        sendJSON(["realtimeInput": ["activityEnd": [:]]])
+        sendJSON(["realtimeInput": ["audioStreamEnd": true]])
     }
 
     private func sendJSON(_ object: [String: Any]) {
@@ -643,7 +617,8 @@ final class GeminiLiveClient: NSObject {
                 currentTurnAudioChunksSent = 0
                 currentTurnAudioBytesSent = 0
                 print("🎙️ Speech started (rms=\(rms))")
-                startAudioTurnIfNeeded()
+                didSendActivityStartForCurrentTurn = true
+                sendActivityStart()
             }
             vadHasDetectedSpeechInCurrentTurn = true
             vadSilenceBeganUptime = nil
@@ -664,7 +639,8 @@ final class GeminiLiveClient: NSObject {
 
             guard !isAwaitingModelResponse else { return }
             isAwaitingModelResponse = true
-            sendTurnComplete()
+            didSendActivityStartForCurrentTurn = false
+            sendActivityEnd()
         }
     }
 
@@ -765,7 +741,7 @@ final class GeminiLiveClient: NSObject {
         isReadyForAudio = false
         isAwaitingModelResponse = false
         vadHasDetectedSpeechInCurrentTurn = false
-        didStartClientContentTurnForCurrentAudioTurn = false
+        didSendActivityStartForCurrentTurn = false
         vadSilenceBeganUptime = nil
         nextRmsLogUptime = 0
         stopAudio()
