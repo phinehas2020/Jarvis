@@ -662,9 +662,8 @@ struct OptionsView: View {
                         SecureField("Enter Gemini API Key", text: $geminiApiKey)
                             .autocapitalization(.none)
 
-                        TextField("Model (raw ID, no models/ prefix)", text: $geminiModel)
-                            .placeholder("gemini-2.5-flash-native-audio-preview-09-2025")
-                            .autocapitalization(.none)
+                        TextField("Model (e.g. gemini-2.5-flash-native-audio-preview-09-2025)", text: $geminiModel)
+                            .autocapitalization(.never)
 
                         TextField("Live WebSocket URL", text: $geminiLiveEndpoint)
                             .autocapitalization(.none)
