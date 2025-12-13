@@ -43,6 +43,9 @@ final class GeminiLiveClient: NSObject {
     private var vadHasDetectedSpeechInCurrentTurn: Bool = false
     private var vadSilenceBeganUptime: TimeInterval?
     private var nextRmsLogUptime: TimeInterval = 0
+    private var currentTurnStartUptime: TimeInterval?
+    private var currentTurnAudioChunksSent: Int = 0
+    private var currentTurnAudioBytesSent: Int = 0
 
     init(apiKey: String, model: String, systemPrompt: String, endpointUrlString: String = GeminiLiveClient.defaultEndpointUrlString) {
         self.apiKey = apiKey
@@ -198,6 +201,13 @@ final class GeminiLiveClient: NSObject {
         guard !isPlayingAssistantAudio() else { return }
         guard vadHasDetectedSpeechInCurrentTurn else { return }
 
+        if currentTurnAudioChunksSent == 0 {
+            print("🎤 Sending first audio chunk (\(pcm16Data.count) bytes @ \(sampleRate)Hz)")
+        }
+
+        currentTurnAudioChunksSent += 1
+        currentTurnAudioBytesSent += pcm16Data.count
+
         let base64 = pcm16Data.base64EncodedString()
         let message: [String: Any] = [
             "realtimeInput": [
@@ -224,12 +234,22 @@ final class GeminiLiveClient: NSObject {
         guard isConnected else { return }
         guard isReadyForAudio else { return }
 
+        if let start = currentTurnStartUptime {
+            let duration = ProcessInfo.processInfo.systemUptime - start
+            print("🎤 Ending speech turn (\(currentTurnAudioChunksSent) chunks, \(currentTurnAudioBytesSent) bytes, ~\(String(format: "%.2f", duration))s)")
+        } else {
+            print("🎤 Ending speech turn (\(currentTurnAudioChunksSent) chunks, \(currentTurnAudioBytesSent) bytes)")
+        }
+        currentTurnStartUptime = nil
+        currentTurnAudioChunksSent = 0
+        currentTurnAudioBytesSent = 0
+
         let message: [String: Any] = [
-            "clientContent": [
+            "realtimeInput": [
                 "turnComplete": true
             ]
         ]
-        print("📤 Sending turnComplete (audio)")
+        print("📤 Sending turnComplete (realtimeInput)")
         sendJSON(message)
     }
 
@@ -554,6 +574,12 @@ final class GeminiLiveClient: NSObject {
         }
 
         if isSpeech {
+            if !vadHasDetectedSpeechInCurrentTurn {
+                currentTurnStartUptime = now
+                currentTurnAudioChunksSent = 0
+                currentTurnAudioBytesSent = 0
+                print("🎙️ Speech started (rms=\(rms))")
+            }
             vadHasDetectedSpeechInCurrentTurn = true
             vadSilenceBeganUptime = nil
             return
