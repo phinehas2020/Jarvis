@@ -48,6 +48,8 @@ final class GeminiLiveClient: NSObject {
     private var currentTurnStartUptime: TimeInterval?
     private var currentTurnAudioChunksSent: Int = 0
     private var currentTurnAudioBytesSent: Int = 0
+    private var responseTimeoutTimer: Timer?
+    private let responseTimeoutSeconds: TimeInterval = 10.0
 
     init(apiKey: String, model: String, systemPrompt: String, endpointUrlString: String = GeminiLiveClient.defaultEndpointUrlString) {
         self.apiKey = apiKey
@@ -166,7 +168,7 @@ final class GeminiLiveClient: NSObject {
         var setupDict: [String: Any] = [
             "model": modelName,
             "generationConfig": [
-                "responseModalities": ["AUDIO"],
+                "responseModalities": ["TEXT", "AUDIO"],  // Include both TEXT and AUDIO modalities
                 "speechConfig": [
                     "voiceConfig": [
                         "prebuiltVoiceConfig": [
@@ -238,7 +240,23 @@ final class GeminiLiveClient: NSObject {
         guard isConnected else { return }
         guard isReadyForAudio else { return }
         print("📤 Sending audioStreamEnd")
+        print("⏳ Awaiting model response...")
         sendJSON(["realtimeInput": ["audioStreamEnd": true]])
+        
+        // Start timeout timer
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.responseTimeoutTimer?.invalidate()
+            self.responseTimeoutTimer = Timer.scheduledTimer(withTimeInterval: self.responseTimeoutSeconds, repeats: false) { [weak self] _ in
+                guard let self else { return }
+                if self.isAwaitingModelResponse {
+                    print("⚠️ Response timeout - no response from Gemini after \(self.responseTimeoutSeconds)s")
+                    print("⚠️ This might indicate an API issue, incorrect model name, or missing configuration")
+                    self.isAwaitingModelResponse = false
+                    self.vadHasDetectedSpeechInCurrentTurn = false
+                }
+            }
+        }
     }
 
     private func sendJSON(_ object: [String: Any]) {
@@ -304,11 +322,12 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func handleMessage(_ text: String) {
-        print("📥 Received Gemini Live message: \(text.prefix(200))...")
+        print("📥 Received Gemini Live message: \(text.prefix(400))...")
         
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             print("⚠️ Failed to parse message JSON")
+            print("⚠️ Raw message: \(text)")
             return
         }
 
@@ -340,6 +359,7 @@ final class GeminiLiveClient: NSObject {
         // Handle serverContent
         guard let serverContent = json["serverContent"] as? [String: Any] else {
             print("⚠️ Unhandled message type, keys: \(json.keys.joined(separator: ", "))")
+            print("⚠️ Full JSON: \(json)")
             return
         }
 
@@ -354,6 +374,13 @@ final class GeminiLiveClient: NSObject {
         if let modelTurn = serverContent["modelTurn"] as? [String: Any],
            let parts = modelTurn["parts"] as? [[String: Any]] {
             print("✅ Received model turn with \(parts.count) parts")
+            
+            // Cancel timeout as we received a response
+            DispatchQueue.main.async { [weak self] in
+                self?.responseTimeoutTimer?.invalidate()
+                self?.responseTimeoutTimer = nil
+            }
+            
             for part in parts {
                 if let text = part["text"] as? String, !text.isEmpty {
                     print("💬 Received text: \(text)")
@@ -376,6 +403,10 @@ final class GeminiLiveClient: NSObject {
         if serverContent["turnComplete"] != nil {
             print("✅ Turn complete")
             isAwaitingModelResponse = false
+            DispatchQueue.main.async { [weak self] in
+                self?.responseTimeoutTimer?.invalidate()
+                self?.responseTimeoutTimer = nil
+            }
         }
     }
 
@@ -728,6 +759,12 @@ final class GeminiLiveClient: NSObject {
         vadSilenceBeganUptime = nil
         nextRmsLogUptime = 0
         stopAudio()
+        
+        // Clean up timeout timer
+        DispatchQueue.main.async { [weak self] in
+            self?.responseTimeoutTimer?.invalidate()
+            self?.responseTimeoutTimer = nil
+        }
 
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
