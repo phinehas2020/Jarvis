@@ -663,7 +663,7 @@ struct OptionsView: View {
                             .autocapitalization(.none)
 
                         TextField("Model (e.g. gemini-2.5-flash-native-audio-preview-09-2025)", text: $geminiModel)
-                            .autocapitalization(.never)
+                            .autocapitalization(.none)
 
                         TextField("Live WebSocket URL", text: $geminiLiveEndpoint)
                             .autocapitalization(.none)
