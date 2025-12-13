@@ -36,7 +36,8 @@ final class GeminiLiveClient: NSObject {
     private var converterInputFormat: AVAudioFormat?
     private var converterOutputFormat: AVAudioFormat?
 
-    private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+    // Gemini Live uses REST-style endpoint, not gRPC service path
+    private static let defaultEndpointUrlString = "wss://us-central1-generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent?alt=websocket"
 
     private let maximumMicGain: Float = 10.0
     private let vadSpeechRmsThreshold: Float = 0.012  // Lower for iPhone mics (was 0.02)
@@ -102,7 +103,12 @@ final class GeminiLiveClient: NSObject {
             return
         }
 
-        let endpoint = remainingEndpointCandidates.removeFirst()
+        var endpoint = remainingEndpointCandidates.removeFirst()
+        
+        // Replace MODEL_PLACEHOLDER with actual model name
+        let modelName = model.hasPrefix("models/") ? model : "models/\(model)"
+        endpoint = endpoint.replacingOccurrences(of: "MODEL_PLACEHOLDER", with: modelName)
+        
         currentEndpointAttempt = endpoint
 
         print("🔌 Gemini Live WS connecting: \(endpoint)")
@@ -120,7 +126,7 @@ final class GeminiLiveClient: NSObject {
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
         
-        // Gemini Live API requires API key in header, not query parameter
+        // Gemini Live API requires API key in header
         if !apiKey.isEmpty {
             request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
             print("🔑 Using header-based authentication (x-goog-api-key)")
@@ -217,7 +223,7 @@ final class GeminiLiveClient: NSObject {
 
         audioChunkCounter += 1
         if audioChunkCounter % 100 == 0 {
-             // We can't calculate RMS from Data easily here efficiently without decoding, 
+             // We can't calculate RMS from Data easily here efficiently without decoding,
              // but we will rely on the fact that we are sending data.
             print("🎤 Sent \(audioChunkCounter) audio chunks (\(pcm16Data.count) bytes @ \(sampleRate)Hz)")
         }
@@ -818,114 +824,20 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func endpointCandidates(from endpoint: String) -> [String] {
-        let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
-
-        func addCandidate(_ candidate: String, to candidates: inout [String]) {
-            let value = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !value.isEmpty else { return }
-            if !candidates.contains(value) {
-                candidates.append(value)
-            }
-        }
-
-        func versionSwap(_ value: String) -> String? {
-            if value.contains(".v1beta.") {
-                return value.replacingOccurrences(of: ".v1beta.", with: ".v1alpha.")
-            }
-            if value.contains(".v1alpha.") {
-                return value.replacingOccurrences(of: ".v1alpha.", with: ".v1beta.")
-            }
-            return nil
-        }
-
-        func wsSwap(_ value: String) -> String? {
-            if value.contains("://generativelanguage.googleapis.com/ws/") {
-                return value.replacingOccurrences(of: "://generativelanguage.googleapis.com/ws/", with: "://generativelanguage.googleapis.com/")
-            }
-            if value.contains("://generativelanguage.googleapis.com/") {
-                return value.replacingOccurrences(of: "://generativelanguage.googleapis.com/", with: "://generativelanguage.googleapis.com/ws/")
-            }
-            return nil
-        }
+        // Gemini Live ONLY works with REST-style endpoints, not gRPC service paths
+        // Format: wss://{region}-generativelanguage.googleapis.com/v1beta/models/{MODEL}:bidiGenerateContent?alt=websocket
         
-        func regionalSwap(_ value: String) -> [String] {
-            // Try regional endpoints if using the global endpoint
-            var regional: [String] = []
-            if value.contains("://generativelanguage.googleapis.com") {
-                // Try us-central1 region (commonly required for Gemini Live)
-                let usCentral = value.replacingOccurrences(
-                    of: "://generativelanguage.googleapis.com",
-                    with: "://us-central1-generativelanguage.googleapis.com"
-                )
-                regional.append(usCentral)
-                
-                // Try europe-west1 region
-                let europeWest = value.replacingOccurrences(
-                    of: "://generativelanguage.googleapis.com",
-                    with: "://europe-west1-generativelanguage.googleapis.com"
-                )
-                regional.append(europeWest)
-            }
-            return regional
-        }
-
-        let swappedVersion = versionSwap(trimmed)
-        let swappedWs = wsSwap(trimmed)
-        let regionalVariants = regionalSwap(trimmed)
-
         var candidates: [String] = []
         
-        // Add regional variants FIRST (they often work better for Gemini Live)
-        for regional in regionalVariants {
-            addCandidate(regional, to: &candidates)
-            // Also try regional variants with version/ws swaps
-            if let regionVersion = versionSwap(regional) {
-                addCandidate(regionVersion, to: &candidates)
-            }
-            if let regionWs = wsSwap(regional) {
-                addCandidate(regionWs, to: &candidates)
-            }
-        }
+        // 1. us-central1 (primary - most reliable for Gemini Live)
+        candidates.append("wss://us-central1-generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent?alt=websocket")
         
-        // Then add the original endpoint as fallback
-        addCandidate(trimmed, to: &candidates)
+        // 2. Global fallback
+        candidates.append("wss://generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent?alt=websocket")
         
-        if let swappedVersion {
-            addCandidate(swappedVersion, to: &candidates)
-        }
-        if let swappedWs {
-            addCandidate(swappedWs, to: &candidates)
-        }
-        if let swappedVersion, let swappedWs {
-            let combined = wsSwap(swappedVersion) ?? versionSwap(swappedWs)
-            if let combined {
-                addCandidate(combined, to: &candidates)
-            }
-        }
-
-        if let url = URL(string: trimmed),
-           let scheme = url.scheme,
-           let host = url.host,
-           (scheme == "wss" || scheme == "ws") {
-            let apiVersion = trimmed.contains("v1alpha") ? "v1alpha" : "v1beta"
-            let modelPath = model.hasPrefix("models/") ? model : "models/\(model)"
-            let base = "\(scheme)://\(host)"
-
-            let restCandidate = "\(base)/\(apiVersion)/\(modelPath):bidiGenerateContent"
-            addCandidate(restCandidate, to: &candidates)
-            addCandidate("\(restCandidate)?alt=websocket", to: &candidates)
-        }
-        
-        // Log the endpoint candidates for debugging
-        if !candidates.isEmpty {
-            print("🔍 Prepared \(candidates.count) endpoint candidates:")
-            for (index, candidate) in candidates.prefix(5).enumerated() {
-                print("   \(index + 1). \(redactApiKey(candidate))")
-            }
-            if candidates.count > 5 {
-                print("   ... and \(candidates.count - 5) more")
-            }
+        print("🔍 Prepared \(candidates.count) Gemini Live endpoint candidates:")
+        for (index, candidate) in candidates.enumerated() {
+            print("   \(index + 1). \(candidate.replacingOccurrences(of: "MODEL_PLACEHOLDER", with: model))")
         }
 
         return candidates
