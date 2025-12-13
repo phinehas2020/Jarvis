@@ -43,7 +43,6 @@ final class GeminiLiveClient: NSObject {
     private let vadContinueRmsThreshold: Float = 0.015
     private let vadSilenceDurationSeconds: TimeInterval = 0.75
     private var vadHasDetectedSpeechInCurrentTurn: Bool = false
-    private var didSendActivityStartForCurrentTurn: Bool = false
     private var vadSilenceBeganUptime: TimeInterval?
     private var nextRmsLogUptime: TimeInterval = 0
     private var currentTurnStartUptime: TimeInterval?
@@ -166,11 +165,6 @@ final class GeminiLiveClient: NSObject {
         
         var setupDict: [String: Any] = [
             "model": modelName,
-            "realtimeInputConfig": [
-                "automaticActivityDetection": [
-                    "disabled": true
-                ]
-            ],
             "generationConfig": [
                 "responseModalities": ["AUDIO"],
                 "speechConfig": [
@@ -184,7 +178,11 @@ final class GeminiLiveClient: NSObject {
         ]
         
         if !systemPrompt.isEmpty {
-            setupDict["systemInstruction"] = systemPrompt
+            setupDict["systemInstruction"] = [
+                "parts": [
+                    ["text": systemPrompt]
+                ]
+            ]
         }
         
         let message: [String: Any] = [
@@ -236,30 +234,10 @@ final class GeminiLiveClient: NSObject {
         }
     }
 
-    private func sendActivityStart() {
+    private func sendAudioStreamEnd() {
         guard isConnected else { return }
         guard isReadyForAudio else { return }
-
-        print("📤 Sending activityStart")
-        sendJSON(["realtimeInput": ["activityStart": [:]]])
-    }
-
-    private func sendActivityEnd() {
-        guard isConnected else { return }
-        guard isReadyForAudio else { return }
-
-        if let start = currentTurnStartUptime {
-            let duration = ProcessInfo.processInfo.systemUptime - start
-            print("🎤 Ending speech turn (\(currentTurnAudioChunksSent) chunks, \(currentTurnAudioBytesSent) bytes, ~\(String(format: "%.2f", duration))s)")
-        } else {
-            print("🎤 Ending speech turn (\(currentTurnAudioChunksSent) chunks, \(currentTurnAudioBytesSent) bytes)")
-        }
-        currentTurnStartUptime = nil
-        currentTurnAudioChunksSent = 0
-        currentTurnAudioBytesSent = 0
-
-        print("📤 Sending activityEnd")
-        sendJSON(["realtimeInput": ["activityEnd": [:]]])
+        print("📤 Sending audioStreamEnd")
         sendJSON(["realtimeInput": ["audioStreamEnd": true]])
     }
 
@@ -617,8 +595,6 @@ final class GeminiLiveClient: NSObject {
                 currentTurnAudioChunksSent = 0
                 currentTurnAudioBytesSent = 0
                 print("🎙️ Speech started (rms=\(rms))")
-                didSendActivityStartForCurrentTurn = true
-                sendActivityStart()
             }
             vadHasDetectedSpeechInCurrentTurn = true
             vadSilenceBeganUptime = nil
@@ -639,8 +615,16 @@ final class GeminiLiveClient: NSObject {
 
             guard !isAwaitingModelResponse else { return }
             isAwaitingModelResponse = true
-            didSendActivityStartForCurrentTurn = false
-            sendActivityEnd()
+            if let start = currentTurnStartUptime {
+                let duration = ProcessInfo.processInfo.systemUptime - start
+                print("🎤 Ending speech turn (\(currentTurnAudioChunksSent) chunks, \(currentTurnAudioBytesSent) bytes, ~\(String(format: "%.2f", duration))s)")
+            } else {
+                print("🎤 Ending speech turn (\(currentTurnAudioChunksSent) chunks, \(currentTurnAudioBytesSent) bytes)")
+            }
+            currentTurnStartUptime = nil
+            currentTurnAudioChunksSent = 0
+            currentTurnAudioBytesSent = 0
+            sendAudioStreamEnd()
         }
     }
 
@@ -741,7 +725,6 @@ final class GeminiLiveClient: NSObject {
         isReadyForAudio = false
         isAwaitingModelResponse = false
         vadHasDetectedSpeechInCurrentTurn = false
-        didSendActivityStartForCurrentTurn = false
         vadSilenceBeganUptime = nil
         nextRmsLogUptime = 0
         stopAudio()
