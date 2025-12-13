@@ -266,20 +266,40 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func sendJSONOnSendQueue(_ object: [String: Any]) {
-        guard let webSocketTask else { return }
-        guard JSONSerialization.isValidJSONObject(object) else { return }
+        guard let webSocketTask else {
+            print("⚠️ Cannot send JSON: WebSocket task is nil")
+            return
+        }
+        
+        guard webSocketTask.state == .running else {
+            print("⚠️ Cannot send JSON: WebSocket state is \(webSocketTask.state.rawValue) (not running)")
+            return
+        }
+        
+        guard JSONSerialization.isValidJSONObject(object) else {
+            print("⚠️ Invalid JSON object")
+            return
+        }
+        
         guard let jsonData = try? JSONSerialization.data(withJSONObject: object),
-              let jsonString = String(data: jsonData, encoding: .utf8) else { return }
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            print("⚠️ Failed to serialize JSON")
+            return
+        }
 
         webSocketTask.send(.string(jsonString)) { [weak self] error in
             guard let self else { return }
             if let nsError = error as NSError? {
                 print("❌ Gemini Live send error: \(nsError.localizedDescription) (domain: \(nsError.domain) code: \(nsError.code))")
+                print("❌ Error details: \(nsError)")
                 if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 {
+                    print("❌ Socket not connected (POSIX 57) - connection was closed")
                     self.teardownConnection(notify: true)
                     return
                 }
                 self.delegate?.geminiLiveClient(self, didEncounterError: nsError)
+            } else {
+                print("✅ Message sent successfully")
             }
         }
     }
@@ -314,7 +334,10 @@ final class GeminiLiveClient: NSObject {
                 }
 
             case .failure(let error):
+                let nsError = error as NSError
                 print("❌ WebSocket receive error: \(error.localizedDescription)")
+                print("❌ Error domain: \(nsError.domain), code: \(nsError.code)")
+                print("❌ Full error: \(nsError)")
                 self.delegate?.geminiLiveClient(self, didEncounterError: error)
                 self.disconnect()
             }
@@ -807,11 +830,46 @@ final class GeminiLiveClient: NSObject {
             }
             return nil
         }
+        
+        func regionalSwap(_ value: String) -> [String] {
+            // Try regional endpoints if using the global endpoint
+            var regional: [String] = []
+            if value.contains("://generativelanguage.googleapis.com") {
+                // Try us-central1 region (commonly required for Gemini Live)
+                let usCentral = value.replacingOccurrences(
+                    of: "://generativelanguage.googleapis.com",
+                    with: "://us-central1-generativelanguage.googleapis.com"
+                )
+                regional.append(usCentral)
+                
+                // Try europe-west1 region
+                let europeWest = value.replacingOccurrences(
+                    of: "://generativelanguage.googleapis.com",
+                    with: "://europe-west1-generativelanguage.googleapis.com"
+                )
+                regional.append(europeWest)
+            }
+            return regional
+        }
 
         let swappedVersion = versionSwap(trimmed)
         let swappedWs = wsSwap(trimmed)
+        let regionalVariants = regionalSwap(trimmed)
 
         var candidates: [String] = [trimmed]
+        
+        // Add regional variants first (they often work better for Gemini Live)
+        for regional in regionalVariants {
+            addCandidate(regional, to: &candidates)
+            // Also try regional variants with version/ws swaps
+            if let regionVersion = versionSwap(regional) {
+                addCandidate(regionVersion, to: &candidates)
+            }
+            if let regionWs = wsSwap(regional) {
+                addCandidate(regionWs, to: &candidates)
+            }
+        }
+        
         if let swappedVersion {
             addCandidate(swappedVersion, to: &candidates)
         }
@@ -913,6 +971,16 @@ extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate 
         guard session === urlSession, webSocketTask === self.webSocketTask else { return }
         let reasonString = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "no reason"
         print("🔌 Gemini Live WebSocket closed: code=\(closeCode.rawValue), reason=\(reasonString)")
+        
+        // Log additional details for debugging
+        if let reason = reason, !reason.isEmpty {
+            print("🔍 Close reason bytes: \(reason as NSData)")
+        }
+        
+        // Check if this is an abnormal closure
+        if closeCode == .abnormalClosure || closeCode == .internalServerError {
+            print("⚠️ Abnormal closure detected - server may have rejected the connection")
+        }
         
         // If we haven't successfully established a session (or just connected and closed), try next candidate
         if !remainingEndpointCandidates.isEmpty {
