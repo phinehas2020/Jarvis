@@ -16,7 +16,7 @@ struct ContentView: View {
     // AppStorage properties
     @AppStorage("apiKey") private var apiKey = API_KEY
     @AppStorage("geminiApiKey") private var geminiApiKey = ""
-    @AppStorage("geminiModel") private var geminiModel = "models/gemini-2.5-flash-native-audio-preview-09-2025"
+    @AppStorage("geminiModel") private var geminiModel = "gemini-2.5-flash-native-audio-preview-09-2025"
     @AppStorage("didMigrateGeminiModelDefault") private var didMigrateGeminiModelDefault = false
     @AppStorage("geminiLiveEndpoint") private var geminiLiveEndpoint = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
     @AppStorage("customMcpEnabled") private var customMcpEnabled = true
@@ -150,7 +150,7 @@ struct ContentView: View {
         ])
         guard legacyModels.contains(trimmed) else { return }
 
-        geminiModel = "models/gemini-2.5-flash-native-audio-preview-09-2025"
+        geminiModel = "gemini-2.5-flash-native-audio-preview-09-2025"
     }
     
     private func sanitizedServerLabel(_ raw: String) -> String {
@@ -662,7 +662,8 @@ struct OptionsView: View {
                         SecureField("Enter Gemini API Key", text: $geminiApiKey)
                             .autocapitalization(.none)
 
-                        TextField("Model (e.g. gemini-2.5-flash-native-audio-preview-09-2025)", text: $geminiModel)
+                        TextField("Model (raw ID, no models/ prefix)", text: $geminiModel)
+                            .placeholder("gemini-2.5-flash-native-audio-preview-09-2025")
                             .autocapitalization(.none)
 
                         TextField("Live WebSocket URL", text: $geminiLiveEndpoint)
