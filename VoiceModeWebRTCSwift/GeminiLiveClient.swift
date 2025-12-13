@@ -856,9 +856,9 @@ final class GeminiLiveClient: NSObject {
         let swappedWs = wsSwap(trimmed)
         let regionalVariants = regionalSwap(trimmed)
 
-        var candidates: [String] = [trimmed]
+        var candidates: [String] = []
         
-        // Add regional variants first (they often work better for Gemini Live)
+        // Add regional variants FIRST (they often work better for Gemini Live)
         for regional in regionalVariants {
             addCandidate(regional, to: &candidates)
             // Also try regional variants with version/ws swaps
@@ -869,6 +869,9 @@ final class GeminiLiveClient: NSObject {
                 addCandidate(regionWs, to: &candidates)
             }
         }
+        
+        // Then add the original endpoint as fallback
+        addCandidate(trimmed, to: &candidates)
         
         if let swappedVersion {
             addCandidate(swappedVersion, to: &candidates)
@@ -894,6 +897,17 @@ final class GeminiLiveClient: NSObject {
             let restCandidate = "\(base)/\(apiVersion)/\(modelPath):bidiGenerateContent"
             addCandidate(restCandidate, to: &candidates)
             addCandidate("\(restCandidate)?alt=websocket", to: &candidates)
+        }
+        
+        // Log the endpoint candidates for debugging
+        if !candidates.isEmpty {
+            print("🔍 Prepared \(candidates.count) endpoint candidates:")
+            for (index, candidate) in candidates.prefix(5).enumerated() {
+                print("   \(index + 1). \(redactApiKey(candidate))")
+            }
+            if candidates.count > 5 {
+                print("   ... and \(candidates.count - 5) more")
+            }
         }
 
         return candidates
