@@ -107,7 +107,9 @@ final class GeminiLiveClient: NSObject {
         
         // Replace MODEL_PLACEHOLDER with raw model ID (NOT prefixed with "models/")
         // The endpoint already contains "/models/" in the path
-        endpoint = endpoint.replacingOccurrences(of: "MODEL_PLACEHOLDER", with: model)
+        // Strip "models/" prefix if it exists to avoid double prefix
+        let rawModelId = model.hasPrefix("models/") ? String(model.dropFirst("models/".count)) : model
+        endpoint = endpoint.replacingOccurrences(of: "MODEL_PLACEHOLDER", with: rawModelId)
         
         currentEndpointAttempt = endpoint
 
