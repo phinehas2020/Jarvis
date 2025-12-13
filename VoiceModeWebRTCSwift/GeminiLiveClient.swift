@@ -14,6 +14,7 @@ final class GeminiLiveClient: NSObject {
     private let model: String
     private let systemPrompt: String
     private let endpointUrlString: String
+    private let webSocketSendQueue = DispatchQueue(label: "GeminiLiveClient.webSocketSendQueue")
 
     private var urlSession: URLSession?
     private var webSocketTask: URLSessionWebSocketTask?
@@ -210,26 +211,30 @@ final class GeminiLiveClient: NSObject {
         currentTurnAudioChunksSent += 1
         currentTurnAudioBytesSent += pcm16Data.count
 
-        let base64 = pcm16Data.base64EncodedString()
-        let message: [String: Any] = [
-            "realtimeInput": [
-                "mediaChunks": [
-                    [
-                        "mimeType": "audio/pcm;rate=\(sampleRate)",
-                        "data": base64
-                    ]
-                ]
-            ]
-        ]
-
         audioChunkCounter += 1
         if audioChunkCounter % 100 == 0 {
              // We can't calculate RMS from Data easily here efficiently without decoding, 
              // but we will rely on the fact that we are sending data.
             print("🎤 Sent \(audioChunkCounter) audio chunks (\(pcm16Data.count) bytes @ \(sampleRate)Hz)")
         }
-        
-        sendJSON(message)
+
+        let pcmDataToSend = pcm16Data
+        let sampleRateToSend = sampleRate
+        webSocketSendQueue.async { [weak self] in
+            guard let self else { return }
+            let base64 = pcmDataToSend.base64EncodedString()
+            let message: [String: Any] = [
+                "realtimeInput": [
+                    "mediaChunks": [
+                        [
+                            "mimeType": "audio/pcm;rate=\(sampleRateToSend)",
+                            "data": base64
+                        ]
+                    ]
+                ]
+            ]
+            self.sendJSONOnSendQueue(message)
+        }
     }
 
     private func sendTurnComplete() {
@@ -285,6 +290,12 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func sendJSON(_ object: [String: Any]) {
+        webSocketSendQueue.async { [weak self] in
+            self?.sendJSONOnSendQueue(object)
+        }
+    }
+
+    private func sendJSONOnSendQueue(_ object: [String: Any]) {
         guard let webSocketTask else { return }
         guard JSONSerialization.isValidJSONObject(object) else { return }
         guard let jsonData = try? JSONSerialization.data(withJSONObject: object),
@@ -448,7 +459,7 @@ final class GeminiLiveClient: NSObject {
             commonFormat: .pcmFormatInt16,
             sampleRate: desiredInputSampleRate,
             channels: 1,
-            interleaved: true
+            interleaved: false
         )
         converterOutputFormat = outputFormat
         if let outputFormat {
