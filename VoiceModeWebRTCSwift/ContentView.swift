@@ -19,6 +19,7 @@ struct ContentView: View {
     @AppStorage("geminiModel") private var geminiModel = "gemini-2.5-flash-native-audio-preview-09-2025"
     @AppStorage("didMigrateGeminiModelDefault") private var didMigrateGeminiModelDefault = false
     @AppStorage("didMigrateGeminiModelDefaultV2") private var didMigrateGeminiModelDefaultV2 = false
+    @AppStorage("didMigrateGeminiModelDefaultV3") private var didMigrateGeminiModelDefaultV3 = false
     @AppStorage("geminiLiveEndpoint") private var geminiLiveEndpoint = ""
     @AppStorage("customMcpEnabled") private var customMcpEnabled = true
     @AppStorage("customMcpServerUrl") private var customMcpServerUrl = ""
@@ -154,13 +155,19 @@ struct ContentView: View {
             }
         }
 
-        // Migration V2: Revert 12-2025 back to 09-2025 (Dec model may not be available)
+        // Migration V2: (legacy - already ran for existing users)
         if !didMigrateGeminiModelDefaultV2 {
             didMigrateGeminiModelDefaultV2 = true
+        }
+
+        // Migration V3: Revert 12-2025 back to 09-2025 (Dec model doesn't exist)
+        if !didMigrateGeminiModelDefaultV3 {
+            didMigrateGeminiModelDefaultV3 = true
             let trimmed = geminiModel.trimmingCharacters(in: .whitespacesAndNewlines)
             // If user has the December model that doesn't exist, revert to September
             if trimmed == "gemini-2.5-flash-native-audio-preview-12-2025" {
                 geminiModel = "gemini-2.5-flash-native-audio-preview-09-2025"
+                print("🔄 Migrated model from 12-2025 to 09-2025")
             }
         }
     }
