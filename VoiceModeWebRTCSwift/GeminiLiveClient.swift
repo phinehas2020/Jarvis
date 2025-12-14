@@ -36,9 +36,9 @@ final class GeminiLiveClient: NSObject {
     private var converterInputFormat: AVAudioFormat?
     private var converterOutputFormat: AVAudioFormat?
 
-    // Gemini Live uses REST-style endpoint with API key in query parameter
-    // Format: wss://generativelanguage.googleapis.com/v1beta/models/{MODEL}:bidiGenerateContent?key={API_KEY}&alt=ws
-    private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent"
+    // Gemini Live API WebSocket endpoint - model is specified in setup message, not URL
+    // Format: wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={API_KEY}
+    private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
     private let maximumMicGain: Float = 10.0
     private let vadSpeechRmsThreshold: Float = 0.012  // Lower for iPhone mics (was 0.02)
@@ -106,14 +106,7 @@ final class GeminiLiveClient: NSObject {
 
         var endpoint = remainingEndpointCandidates.removeFirst()
         
-        // Replace MODEL_PLACEHOLDER with raw model ID (NOT prefixed with "models/")
-        // The endpoint already contains "/models/" in the path
-        // Strip "models/" prefix if it exists to avoid double prefix
-        let rawModelId = model.hasPrefix("models/") ? String(model.dropFirst("models/".count)) : model
-        endpoint = endpoint.replacingOccurrences(of: "MODEL_PLACEHOLDER", with: rawModelId)
-        
         // Add API key as query parameter (required for Gemini Live WebSocket)
-        // Format: ?key={API_KEY}&alt=ws
         if !apiKey.isEmpty {
             let separator = endpoint.contains("?") ? "&" : "?"
             endpoint = "\(endpoint)\(separator)key=\(apiKey)"
@@ -123,6 +116,7 @@ final class GeminiLiveClient: NSObject {
         currentEndpointAttempt = endpoint
 
         print("🔌 Gemini Live WS connecting: \(endpoint.replacingOccurrences(of: apiKey, with: "***API_KEY***"))")
+        print("📋 Model: \(model) (will be sent in setup message)")
 
         guard let url = URL(string: endpoint) else {
             connectNextEndpoint()
@@ -180,14 +174,20 @@ final class GeminiLiveClient: NSObject {
     private func sendSetup() {
         guard isConnected else { return }
 
-        // Gemini Live requires realtimeConfig, not generationConfig
+        // Model name must be prefixed with "models/"
         let modelName = model.hasPrefix("models/") ? model : "models/\(model)"
         
+        // Gemini Live API setup message format
         var setupDict: [String: Any] = [
             "model": modelName,
-            "realtimeConfig": [
-                "responseAudio": [
-                    "voice": "Puck"
+            "generationConfig": [
+                "responseModalities": ["AUDIO"],
+                "speechConfig": [
+                    "voiceConfig": [
+                        "prebuiltVoiceConfig": [
+                            "voiceName": "Puck"
+                        ]
+                    ]
                 ]
             ]
         ]
@@ -204,9 +204,12 @@ final class GeminiLiveClient: NSObject {
             "setup": setupDict
         ]
 
-        print("📤 Sending Gemini Live setup with realtimeConfig")
-        print("📤 Model: \(model)")
-        print("📤 Setup JSON: \(String(data: try! JSONSerialization.data(withJSONObject: message), encoding: .utf8) ?? "error")")
+        print("📤 Sending Gemini Live setup")
+        print("📤 Model: \(modelName)")
+        if let jsonData = try? JSONSerialization.data(withJSONObject: message, options: .prettyPrinted),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            print("📤 Setup JSON: \(jsonString)")
+        }
         sendJSON(message)
     }
 
@@ -829,36 +832,25 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func endpointCandidates(from endpoint: String) -> [String] {
-        // Gemini Live API requires:
-        // - v1beta API version (not v1alpha)
-        // - API key as query parameter (?key=...)
-        // Format: wss://generativelanguage.googleapis.com/v1beta/models/{MODEL}:bidiGenerateContent?key={API_KEY}
+        // Gemini Live API WebSocket format:
+        // wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={API_KEY}
+        // The model is specified in the setup message, NOT in the URL
         
         var candidates: [String] = []
         
-        // 0. Use provided endpoint if it looks like a valid template
-        // We filter out the legacy gRPC-style endpoint if it's passed by accident/default
-        if !endpoint.isEmpty {
-            if endpoint.contains("MODEL_PLACEHOLDER") || endpoint.contains("/models/") {
-                // Upgrade v1alpha to v1beta if needed
-                var fixedEndpoint = endpoint.replacingOccurrences(of: "/v1alpha/", with: "/v1beta/")
-                candidates.append(fixedEndpoint)
-            } else {
-                 print("⚠️ Ignoring provided endpoint because it doesn't look like a valid REST-style Gemini Live URL: \(endpoint)")
-            }
+        // Use provided endpoint if it looks valid (contains BidiGenerateContent or /ws/)
+        if !endpoint.isEmpty && (endpoint.contains("BidiGenerateContent") || endpoint.contains("/ws/")) {
+            candidates.append(endpoint)
         }
 
-        // 1. Global endpoint with v1beta (primary - most reliable for Gemini Live)
-        candidates.append("wss://generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent")
-
-        // 2. us-central1 regional endpoint with v1beta (fallback)
-        candidates.append("wss://us-central1-generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent")
+        // Primary: Global WebSocket endpoint for Gemini Live API
+        candidates.append("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")
         
         print("🔍 Prepared \(candidates.count) Gemini Live endpoint candidates:")
-        let modelId = model.hasPrefix("models/") ? String(model.dropFirst("models/".count)) : model
         for (index, candidate) in candidates.enumerated() {
-            print("   \(index + 1). \(candidate.replacingOccurrences(of: "MODEL_PLACEHOLDER", with: modelId))")
+            print("   \(index + 1). \(candidate)")
         }
+        print("📋 Model will be specified in setup message: \(model)")
 
         return candidates
     }
