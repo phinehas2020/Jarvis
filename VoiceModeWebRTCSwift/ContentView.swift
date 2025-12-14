@@ -16,8 +16,9 @@ struct ContentView: View {
     // AppStorage properties
     @AppStorage("apiKey") private var apiKey = API_KEY
     @AppStorage("geminiApiKey") private var geminiApiKey = ""
-    @AppStorage("geminiModel") private var geminiModel = "gemini-2.5-flash-native-audio-preview-09-2025"
+    @AppStorage("geminiModel") private var geminiModel = "gemini-2.5-flash-native-audio-preview-12-2025"
     @AppStorage("didMigrateGeminiModelDefault") private var didMigrateGeminiModelDefault = false
+    @AppStorage("didMigrateGeminiModelDefaultV2") private var didMigrateGeminiModelDefaultV2 = false
     @AppStorage("geminiLiveEndpoint") private var geminiLiveEndpoint = ""
     @AppStorage("customMcpEnabled") private var customMcpEnabled = true
     @AppStorage("customMcpServerUrl") private var customMcpServerUrl = ""
@@ -140,17 +141,27 @@ struct ContentView: View {
     }
 
     private func migrateGeminiModelIfNeeded() {
-        guard !didMigrateGeminiModelDefault else { return }
-        didMigrateGeminiModelDefault = true
+        // Migration V1: 2.0-flash-exp -> 2.5-flash-09-2025
+        if !didMigrateGeminiModelDefault {
+            didMigrateGeminiModelDefault = true
+            let trimmed = geminiModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            let legacyModels = Set([
+                "models/gemini-2.0-flash-exp",
+                "gemini-2.0-flash-exp"
+            ])
+            if legacyModels.contains(trimmed) {
+                geminiModel = "gemini-2.5-flash-native-audio-preview-09-2025"
+            }
+        }
 
-        let trimmed = geminiModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let legacyModels = Set([
-            "models/gemini-2.0-flash-exp",
-            "gemini-2.0-flash-exp"
-        ])
-        guard legacyModels.contains(trimmed) else { return }
-
-        geminiModel = "gemini-2.5-flash-native-audio-preview-09-2025"
+        // Migration V2: 2.5-flash-09-2025 -> 2.5-flash-12-2025
+        if !didMigrateGeminiModelDefaultV2 {
+            didMigrateGeminiModelDefaultV2 = true
+            let trimmed = geminiModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed == "gemini-2.5-flash-native-audio-preview-09-2025" {
+                geminiModel = "gemini-2.5-flash-native-audio-preview-12-2025"
+            }
+        }
     }
     
     private func sanitizedServerLabel(_ raw: String) -> String {
