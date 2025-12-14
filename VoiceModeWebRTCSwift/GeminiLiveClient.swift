@@ -31,7 +31,7 @@ final class GeminiLiveClient: NSObject {
     private let playbackStateLock = NSLock()
     private var pendingPlaybackBuffers: Int = 0
 
-    private let desiredInputSampleRate: Double = 24000
+    private let desiredInputSampleRate: Double = 16000  // Gemini Live API expects 16kHz input
     private var audioConverter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
     private var converterOutputFormat: AVAudioFormat?
@@ -241,9 +241,10 @@ final class GeminiLiveClient: NSObject {
         webSocketSendQueue.async { [weak self] in
             guard let self else { return }
             let base64 = pcmDataToSend.base64EncodedString()
+            // Use "media" not "audio" - this is the correct format per Gemini Live API docs
             let message: [String: Any] = [
                 "realtimeInput": [
-                    "audio": [
+                    "media": [
                         "mimeType": "audio/pcm;rate=\(sampleRateToSend)",
                         "data": base64
                     ]
@@ -256,9 +257,10 @@ final class GeminiLiveClient: NSObject {
     private func sendAudioStreamEnd() {
         guard isConnected else { return }
         guard isReadyForAudio else { return }
-        print("📤 Sending audioStreamEnd")
+        print("📤 Sending activityEnd")
         print("⏳ Awaiting model response...")
-        sendJSON(["realtimeInput": ["audioStreamEnd": true]])
+        // Use activityEnd to signal end of audio input (not audioStreamEnd)
+        sendJSON(["realtimeInput": ["activityEnd": [:]]])
         
         // Start timeout timer
         DispatchQueue.main.async { [weak self] in
