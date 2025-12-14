@@ -37,7 +37,7 @@ final class GeminiLiveClient: NSObject {
     private var converterOutputFormat: AVAudioFormat?
 
     // Gemini Live uses REST-style endpoint, not gRPC service path
-    private static let defaultEndpointUrlString = "wss://us-central1-generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent?alt=websocket"
+    private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent"
 
     private let maximumMicGain: Float = 10.0
     private let vadSpeechRmsThreshold: Float = 0.012  // Lower for iPhone mics (was 0.02)
@@ -827,7 +827,7 @@ final class GeminiLiveClient: NSObject {
 
     private func endpointCandidates(from endpoint: String) -> [String] {
         // Gemini Live ONLY works with REST-style endpoints, not gRPC service paths
-        // Format: wss://{region}-generativelanguage.googleapis.com/v1beta/models/{MODEL}:bidiGenerateContent?alt=websocket
+        // Format: wss://generativelanguage.googleapis.com/v1beta/models/{MODEL}:bidiGenerateContent
         
         var candidates: [String] = []
         
@@ -841,11 +841,11 @@ final class GeminiLiveClient: NSObject {
             }
         }
 
-        // 1. us-central1 (primary - most reliable for Gemini Live)
-        candidates.append("wss://us-central1-generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent?alt=websocket")
-        
-        // 2. Global fallback
-        candidates.append("wss://generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent?alt=websocket")
+        // 1. Global (primary - most reliable for Gemini Live)
+        candidates.append("wss://generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent")
+
+        // 2. us-central1 (fallback, try without alt=websocket just in case)
+        candidates.append("wss://us-central1-generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent")
         
         print("🔍 Prepared \(candidates.count) Gemini Live endpoint candidates:")
         let modelId = model.hasPrefix("models/") ? String(model.dropFirst("models/".count)) : model
