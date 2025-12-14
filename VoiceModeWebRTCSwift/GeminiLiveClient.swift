@@ -831,6 +831,16 @@ final class GeminiLiveClient: NSObject {
         
         var candidates: [String] = []
         
+        // 0. Use provided endpoint if it looks like a valid template
+        // We filter out the legacy gRPC-style endpoint if it's passed by accident/default
+        if !endpoint.isEmpty {
+            if endpoint.contains("MODEL_PLACEHOLDER") || endpoint.contains("/models/") {
+                candidates.append(endpoint)
+            } else {
+                 print("⚠️ Ignoring provided endpoint because it doesn't look like a valid REST-style Gemini Live URL: \(endpoint)")
+            }
+        }
+
         // 1. us-central1 (primary - most reliable for Gemini Live)
         candidates.append("wss://us-central1-generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent?alt=websocket")
         
@@ -838,8 +848,9 @@ final class GeminiLiveClient: NSObject {
         candidates.append("wss://generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent?alt=websocket")
         
         print("🔍 Prepared \(candidates.count) Gemini Live endpoint candidates:")
+        let modelId = model.hasPrefix("models/") ? String(model.dropFirst("models/".count)) : model
         for (index, candidate) in candidates.enumerated() {
-            print("   \(index + 1). \(candidate.replacingOccurrences(of: "MODEL_PLACEHOLDER", with: model))")
+            print("   \(index + 1). \(candidate.replacingOccurrences(of: "MODEL_PLACEHOLDER", with: modelId))")
         }
 
         return candidates

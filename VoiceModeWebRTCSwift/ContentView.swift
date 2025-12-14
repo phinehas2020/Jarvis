@@ -18,7 +18,7 @@ struct ContentView: View {
     @AppStorage("geminiApiKey") private var geminiApiKey = ""
     @AppStorage("geminiModel") private var geminiModel = "gemini-2.5-flash-native-audio-preview-09-2025"
     @AppStorage("didMigrateGeminiModelDefault") private var didMigrateGeminiModelDefault = false
-    @AppStorage("geminiLiveEndpoint") private var geminiLiveEndpoint = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+    @AppStorage("geminiLiveEndpoint") private var geminiLiveEndpoint = ""
     @AppStorage("customMcpEnabled") private var customMcpEnabled = true
     @AppStorage("customMcpServerUrl") private var customMcpServerUrl = ""
     @AppStorage("customMcpServerLabel") private var customMcpServerLabel = "bluebubbles"
