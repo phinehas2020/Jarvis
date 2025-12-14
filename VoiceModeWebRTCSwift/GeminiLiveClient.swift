@@ -37,7 +37,7 @@ final class GeminiLiveClient: NSObject {
     private var converterOutputFormat: AVAudioFormat?
 
     // Gemini Live uses REST-style endpoint, not gRPC service path
-    private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent"
+    private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/v1alpha/models/MODEL_PLACEHOLDER:bidiGenerateContent"
 
     private let maximumMicGain: Float = 10.0
     private let vadSpeechRmsThreshold: Float = 0.012  // Lower for iPhone mics (was 0.02)
@@ -842,10 +842,10 @@ final class GeminiLiveClient: NSObject {
         }
 
         // 1. Global (primary - most reliable for Gemini Live)
-        candidates.append("wss://generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent")
+        candidates.append("wss://generativelanguage.googleapis.com/v1alpha/models/MODEL_PLACEHOLDER:bidiGenerateContent")
 
         // 2. us-central1 (fallback, try without alt=websocket just in case)
-        candidates.append("wss://us-central1-generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent")
+        candidates.append("wss://us-central1-generativelanguage.googleapis.com/v1alpha/models/MODEL_PLACEHOLDER:bidiGenerateContent")
         
         print("🔍 Prepared \(candidates.count) Gemini Live endpoint candidates:")
         let modelId = model.hasPrefix("models/") ? String(model.dropFirst("models/".count)) : model
@@ -988,7 +988,7 @@ extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate 
                 return
             }
             
-            if response.statusCode == 404 {
+            if response.statusCode == 404 || response.statusCode == 400 {
                 let endpoint = currentEndpointAttempt ?? "unknown endpoint"
                 probeHttpError(for: endpoint)
             }
