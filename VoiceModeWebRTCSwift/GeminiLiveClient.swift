@@ -36,8 +36,9 @@ final class GeminiLiveClient: NSObject {
     private var converterInputFormat: AVAudioFormat?
     private var converterOutputFormat: AVAudioFormat?
 
-    // Gemini Live uses REST-style endpoint, not gRPC service path
-    private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/v1alpha/models/MODEL_PLACEHOLDER:bidiGenerateContent"
+    // Gemini Live uses REST-style endpoint with API key in query parameter
+    // Format: wss://generativelanguage.googleapis.com/v1beta/models/{MODEL}:bidiGenerateContent?key={API_KEY}&alt=ws
+    private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent"
 
     private let maximumMicGain: Float = 10.0
     private let vadSpeechRmsThreshold: Float = 0.012  // Lower for iPhone mics (was 0.02)
@@ -111,9 +112,17 @@ final class GeminiLiveClient: NSObject {
         let rawModelId = model.hasPrefix("models/") ? String(model.dropFirst("models/".count)) : model
         endpoint = endpoint.replacingOccurrences(of: "MODEL_PLACEHOLDER", with: rawModelId)
         
+        // Add API key as query parameter (required for Gemini Live WebSocket)
+        // Format: ?key={API_KEY}&alt=ws
+        if !apiKey.isEmpty {
+            let separator = endpoint.contains("?") ? "&" : "?"
+            endpoint = "\(endpoint)\(separator)key=\(apiKey)"
+            print("🔑 Using query parameter authentication (?key=...)")
+        }
+        
         currentEndpointAttempt = endpoint
 
-        print("🔌 Gemini Live WS connecting: \(endpoint)")
+        print("🔌 Gemini Live WS connecting: \(endpoint.replacingOccurrences(of: apiKey, with: "***API_KEY***"))")
 
         guard let url = URL(string: endpoint) else {
             connectNextEndpoint()
@@ -127,12 +136,6 @@ final class GeminiLiveClient: NSObject {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
-        
-        // Gemini Live API requires API key in header
-        if !apiKey.isEmpty {
-            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
-            print("🔑 Using header-based authentication (x-goog-api-key)")
-        }
 
         webSocketTask = session.webSocketTask(with: request)
         webSocketTask?.resume()
@@ -826,8 +829,10 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func endpointCandidates(from endpoint: String) -> [String] {
-        // Gemini Live ONLY works with REST-style endpoints, not gRPC service paths
-        // Format: wss://generativelanguage.googleapis.com/v1beta/models/{MODEL}:bidiGenerateContent
+        // Gemini Live API requires:
+        // - v1beta API version (not v1alpha)
+        // - API key as query parameter (?key=...)
+        // Format: wss://generativelanguage.googleapis.com/v1beta/models/{MODEL}:bidiGenerateContent?key={API_KEY}
         
         var candidates: [String] = []
         
@@ -835,17 +840,19 @@ final class GeminiLiveClient: NSObject {
         // We filter out the legacy gRPC-style endpoint if it's passed by accident/default
         if !endpoint.isEmpty {
             if endpoint.contains("MODEL_PLACEHOLDER") || endpoint.contains("/models/") {
-                candidates.append(endpoint)
+                // Upgrade v1alpha to v1beta if needed
+                var fixedEndpoint = endpoint.replacingOccurrences(of: "/v1alpha/", with: "/v1beta/")
+                candidates.append(fixedEndpoint)
             } else {
                  print("⚠️ Ignoring provided endpoint because it doesn't look like a valid REST-style Gemini Live URL: \(endpoint)")
             }
         }
 
-        // 1. Global (primary - most reliable for Gemini Live)
-        candidates.append("wss://generativelanguage.googleapis.com/v1alpha/models/MODEL_PLACEHOLDER:bidiGenerateContent")
+        // 1. Global endpoint with v1beta (primary - most reliable for Gemini Live)
+        candidates.append("wss://generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent")
 
-        // 2. us-central1 (fallback, try without alt=websocket just in case)
-        candidates.append("wss://us-central1-generativelanguage.googleapis.com/v1alpha/models/MODEL_PLACEHOLDER:bidiGenerateContent")
+        // 2. us-central1 regional endpoint with v1beta (fallback)
+        candidates.append("wss://us-central1-generativelanguage.googleapis.com/v1beta/models/MODEL_PLACEHOLDER:bidiGenerateContent")
         
         print("🔍 Prepared \(candidates.count) Gemini Live endpoint candidates:")
         let modelId = model.hasPrefix("models/") ? String(model.dropFirst("models/".count)) : model
@@ -863,6 +870,8 @@ final class GeminiLiveClient: NSObject {
         } else if urlString.hasPrefix("ws://") {
             urlString = "http://" + String(urlString.dropFirst("ws://".count))
         }
+        
+        // API key should already be in the URL as query parameter
 
         guard let url = URL(string: urlString) else { return }
 
@@ -870,11 +879,6 @@ final class GeminiLiveClient: NSObject {
         request.timeoutInterval = 10
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "accept")
-        
-        // Gemini Live API requires API key in header
-        if !apiKey.isEmpty {
-            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
-        }
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let http = response as? HTTPURLResponse {

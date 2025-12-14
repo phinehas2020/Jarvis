@@ -16,7 +16,7 @@ struct ContentView: View {
     // AppStorage properties
     @AppStorage("apiKey") private var apiKey = API_KEY
     @AppStorage("geminiApiKey") private var geminiApiKey = ""
-    @AppStorage("geminiModel") private var geminiModel = "gemini-2.5-flash-native-audio-preview-12-2025"
+    @AppStorage("geminiModel") private var geminiModel = "gemini-2.5-flash-native-audio-preview-09-2025"
     @AppStorage("didMigrateGeminiModelDefault") private var didMigrateGeminiModelDefault = false
     @AppStorage("didMigrateGeminiModelDefaultV2") private var didMigrateGeminiModelDefaultV2 = false
     @AppStorage("geminiLiveEndpoint") private var geminiLiveEndpoint = ""
@@ -154,12 +154,13 @@ struct ContentView: View {
             }
         }
 
-        // Migration V2: 2.5-flash-09-2025 -> 2.5-flash-12-2025
+        // Migration V2: Revert 12-2025 back to 09-2025 (Dec model may not be available)
         if !didMigrateGeminiModelDefaultV2 {
             didMigrateGeminiModelDefaultV2 = true
             let trimmed = geminiModel.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed == "gemini-2.5-flash-native-audio-preview-09-2025" {
-                geminiModel = "gemini-2.5-flash-native-audio-preview-12-2025"
+            // If user has the December model that doesn't exist, revert to September
+            if trimmed == "gemini-2.5-flash-native-audio-preview-12-2025" {
+                geminiModel = "gemini-2.5-flash-native-audio-preview-09-2025"
             }
         }
     }
@@ -675,6 +676,7 @@ struct OptionsView: View {
 
                         TextField("Model (e.g. gemini-2.5-flash-native-audio-preview-09-2025)", text: $geminiModel)
                             .autocapitalization(.none)
+                            .autocorrectionDisabled()
 
                         TextField("Live WebSocket URL", text: $geminiLiveEndpoint)
                             .autocapitalization(.none)
