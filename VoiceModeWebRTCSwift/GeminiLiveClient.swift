@@ -106,10 +106,10 @@ final class GeminiLiveClient: NSObject {
         var endpoint = remainingEndpointCandidates.removeFirst()
         
         // Replace MODEL_PLACEHOLDER with raw model ID (NOT prefixed with "models/")
-        // The endpoint already contains "/models/" in the path.
-        // We strip "models/" from the input model string to avoid "models/models/" duplication.
-        let modelId = model.hasPrefix("models/") ? String(model.dropFirst("models/".count)) : model
-        endpoint = endpoint.replacingOccurrences(of: "MODEL_PLACEHOLDER", with: modelId)
+        // The endpoint already contains "/models/" in the path
+        // Strip "models/" prefix if it exists to avoid double prefix
+        let rawModelId = model.hasPrefix("models/") ? String(model.dropFirst("models/".count)) : model
+        endpoint = endpoint.replacingOccurrences(of: "MODEL_PLACEHOLDER", with: rawModelId)
         
         currentEndpointAttempt = endpoint
 
@@ -878,14 +878,29 @@ final class GeminiLiveClient: NSObject {
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let http = response as? HTTPURLResponse {
-                let bodyPreview: String
+                var bodyPreview: String = "<no data>"
+                
                 if let data, !data.isEmpty {
-                    let prefix = data.prefix(2048)
+                    // Try to decompress if gzipped
+                    var decodedData = data
+                    if let contentEncoding = http.allHeaderFields["Content-Encoding"] as? String,
+                       contentEncoding.lowercased().contains("gzip") {
+                        // Data might be gzipped - try to decompress
+                        do {
+                            decodedData = try (data as NSData).decompressed(using: .zlib) as Data
+                            print("🔎 Decompressed gzipped response: \(decodedData.count) bytes")
+                        } catch {
+                            print("🔎 Could not decompress gzip: \(error)")
+                        }
+                    }
+                    
+                    let prefix = decodedData.prefix(2048)
                     bodyPreview = String(data: prefix, encoding: .utf8) ?? "<non-utf8 body \(prefix.count) bytes>"
-                } else {
-                    bodyPreview = "<empty body>"
                 }
-                print("🔎 Gemini Live probe HTTP \(http.statusCode) for \(urlString): \(bodyPreview)")
+                
+                print("🔎 Gemini Live probe HTTP \(http.statusCode)")
+                print("🔎 Headers: \(http.allHeaderFields)")
+                print("🔎 Body: \(bodyPreview)")
             } else if let error {
                 print("🔎 Gemini Live probe failed for \(urlString): \(error.localizedDescription)")
             }
