@@ -177,12 +177,13 @@ final class GeminiLiveClient: NSObject {
 
         // Model name must be prefixed with "models/"
         let modelName = model.hasPrefix("models/") ? model : "models/\(model)"
-        
-        // Setup format based on working Pipecat SDK implementation
-        // generationConfig contains the speech configuration directly
+
+        // Setup format for Gemini Live API
+        // CRITICAL: response_modalities must include "AUDIO" to get audio responses!
         var setupDict: [String: Any] = [
             "model": modelName,
             "generationConfig": [
+                "response_modalities": ["AUDIO"],
                 "speech_config": [
                     "voice_config": [
                         "prebuilt_voice_config": [
@@ -192,7 +193,7 @@ final class GeminiLiveClient: NSObject {
                 ]
             ]
         ]
-        
+
         if !systemPrompt.isEmpty {
             setupDict["systemInstruction"] = [
                 "parts": [
@@ -200,7 +201,7 @@ final class GeminiLiveClient: NSObject {
                 ]
             ]
         }
-        
+
         let message: [String: Any] = [
             "setup": setupDict
         ]
