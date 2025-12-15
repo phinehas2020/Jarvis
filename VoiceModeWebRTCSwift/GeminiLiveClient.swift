@@ -6,16 +6,19 @@ protocol GeminiLiveClientDelegate: AnyObject {
     func geminiLiveClient(_ client: GeminiLiveClient, didChangeStatus status: ConnectionStatus)
     func geminiLiveClient(_ client: GeminiLiveClient, didReceiveMessage message: ConversationItem)
     func geminiLiveClient(_ client: GeminiLiveClient, didEncounterError error: Error)
+    // New delegate method for tool execution
+    func geminiLiveClient(_ client: GeminiLiveClient, didRequestToolExecution tool: String, args: [String: Any], callId: String)
 }
 
 /// Minimal Gemini Live client for BidiGenerateContent.
-/// Connects to the v1beta WS, sends setup, streams 16k PCM, and plays 24k PCM responses.
+/// Connects to the v1alpha WS, sends setup (including tools), streams 16k PCM, and plays 24k PCM responses.
 final class GeminiLiveClient: NSObject {
     weak var delegate: GeminiLiveClientDelegate?
 
     private let apiKey: String
     private let model: String
     private let systemPrompt: String
+    private let tools: [[String: Any]] // Store tools for setup
     private let endpointUrlString: String
     private let webSocketSendQueue = DispatchQueue(label: "GeminiLiveClient.webSocketSendQueue")
 
@@ -41,11 +44,13 @@ final class GeminiLiveClient: NSObject {
     private let maximumMicGain: Float = 10.0
     private var nextRmsLogUptime: TimeInterval = 0
 
-    init(apiKey: String, model: String, systemPrompt: String) {
+    init(apiKey: String, model: String, systemPrompt: String, tools: [[String: Any]] = []) {
         self.apiKey = apiKey
         self.model = model.hasPrefix("models/") ? model : "models/\(model)"
         self.systemPrompt = systemPrompt
-        self.endpointUrlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+        self.tools = tools
+        // Updated to v1alpha as per user requirement
+        self.endpointUrlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
         super.init()
         setupAudioSession()
     }
@@ -126,11 +131,102 @@ final class GeminiLiveClient: NSObject {
         isAwaitingModelResponse = true
     }
 
+    // New method to send tool response
+    func sendToolResponse(callId: String, response: String) {
+        guard isConnected else { return }
+
+        // Gemini expects tool responses in 'toolResponse' -> 'functionResponse'
+        // 'response' string needs to be parsed as JSON if it's a JSON string,
+        // because Gemini expects a structured object for the return value
+
+        var responseContent: [String: Any] = [:]
+        if let data = response.data(using: .utf8),
+           let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+             responseContent = jsonObject
+        } else {
+             responseContent = ["result": response]
+        }
+
+        let toolResponseMessage: [String: Any] = [
+            "toolResponse": [
+                "functionResponses": [
+                    [
+                        "id": callId,
+                        "response": responseContent
+                    ]
+                ]
+            ]
+        ]
+
+        print("📤 Sending tool response for \(callId)")
+        sendJSON(toolResponseMessage)
+    }
+
     // MARK: - Setup
     private func sendSetup() {
         guard isConnected else { return }
 
-        let setupDict: [String: Any] = [
+        var geminiFunctionDeclarations: [[String: Any]] = []
+
+        // 1. Process provided tools (Local Tools)
+        // Filter only valid function definitions (OpenAI style) and transform them
+        for tool in tools {
+            if let type = tool["type"] as? String, type == "function" {
+                var t = tool
+                t.removeValue(forKey: "type") // Remove "type": "function" to match Gemini schema
+                geminiFunctionDeclarations.append(t)
+            }
+        }
+
+        // 2. Add MCP definitions (Hardcoded for BlueBubbles/MCP tools support)
+        // Since Gemini doesn't support 'type: mcp' config and we want parity with OpenAI setup
+        let mcpDefs: [[String: Any]] = [
+            [
+                "name": "send_imessage",
+                "description": "Send an outbound iMessage to a single recipient.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "to": ["type": "string", "description": "The recipient's phone number (E.164) or Apple ID"],
+                        "text": ["type": "string", "description": "The message content"]
+                    ],
+                    "required": ["to", "text"]
+                ]
+            ],
+            [
+                "name": "fetch_messages",
+                "description": "Fetch messages from BlueBubbles.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "handle": ["type": "string", "description": "Filter by handle/sender"],
+                        "chatGuid": ["type": "string", "description": "Filter by chat GUID"],
+                        "since": ["type": "string", "description": "Fetch messages since this date"],
+                        "limit": ["type": "integer", "description": "Number of messages to fetch"]
+                    ],
+                    "required": []
+                ]
+            ],
+            [
+                "name": "get_status",
+                "description": "Get quiet-hours / rate-limit state from the bridge.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [:],
+                    "required": []
+                ]
+            ]
+        ]
+
+        // Only add unique names to avoid conflicts if they were somehow passed in local tools
+        let existingNames = Set(geminiFunctionDeclarations.compactMap { $0["name"] as? String })
+        for tool in mcpDefs {
+            if let name = tool["name"] as? String, !existingNames.contains(name) {
+                geminiFunctionDeclarations.append(tool)
+            }
+        }
+
+        var setupDict: [String: Any] = [
             "model": model,
             "generationConfig": [
                 "responseModalities": ["AUDIO"],
@@ -142,8 +238,14 @@ final class GeminiLiveClient: NSObject {
                     ]
                 ]
             ],
-            "systemInstruction": systemPrompt
+            "systemInstruction": ["parts": [["text": systemPrompt]]]
         ]
+
+        if !geminiFunctionDeclarations.isEmpty {
+            setupDict["tools"] = [
+                ["function_declarations": geminiFunctionDeclarations]
+            ]
+        }
 
         let message: [String: Any] = [
             "setup": setupDict
@@ -465,7 +567,10 @@ final class GeminiLiveClient: NSObject {
         }
 
         // serverContent
-        guard let serverContent = json["serverContent"] as? [String: Any] else { return }
+        guard let serverContent = json["serverContent"] as? [String: Any] else {
+            // Check for toolCall directly in the root or inside modelTurn if structure varies
+            return
+        }
 
         if serverContent["turnComplete"] != nil {
             isAwaitingModelResponse = false
@@ -474,17 +579,41 @@ final class GeminiLiveClient: NSObject {
         if let modelTurn = serverContent["modelTurn"] as? [String: Any],
            let parts = modelTurn["parts"] as? [[String: Any]] {
             for part in parts {
+                // Text response
                 if let text = part["text"] as? String, !text.isEmpty {
                     let item = ConversationItem(id: UUID().uuidString, role: "assistant", text: text)
                     delegate?.geminiLiveClient(self, didReceiveMessage: item)
                 }
 
+                // Audio response
                 if let inlineData = part["inlineData"] as? [String: Any],
                    let mimeType = inlineData["mimeType"] as? String,
                    let base64 = inlineData["data"] as? String,
                    let audioData = Data(base64Encoded: base64) {
                     let sampleRate = parseSampleRate(from: mimeType) ?? 24000
                     playAudio(data: audioData, sampleRate: Double(sampleRate))
+                }
+
+                // Function Call
+                if let functionCall = part["functionCall"] as? [String: Any],
+                   let name = functionCall["name"] as? String,
+                   let args = functionCall["args"] as? [String: Any],
+                   let id = functionCall["id"] as? String {
+                    print("🔧 Received tool call: \(name) id: \(id)")
+                    delegate?.geminiLiveClient(self, didRequestToolExecution: name, args: args, callId: id)
+                }
+            }
+        }
+
+        // Handle direct toolCall if it appears outside modelTurn (v1alpha variance)
+        if let toolCall = serverContent["toolCall"] as? [String: Any],
+           let functionCalls = toolCall["functionCalls"] as? [[String: Any]] {
+            for call in functionCalls {
+                if let name = call["name"] as? String,
+                   let args = call["args"] as? [String: Any],
+                   let id = call["id"] as? String {
+                    print("🔧 Received tool call (v1alpha): \(name) id: \(id)")
+                    delegate?.geminiLiveClient(self, didRequestToolExecution: name, args: args, callId: id)
                 }
             }
         }
