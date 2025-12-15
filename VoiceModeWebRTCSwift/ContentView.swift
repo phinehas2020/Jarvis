@@ -16,12 +16,13 @@ struct ContentView: View {
     // AppStorage properties
     @AppStorage("apiKey") private var apiKey = API_KEY
     @AppStorage("geminiApiKey") private var geminiApiKey = ""
-    // gemini-2.0-flash-exp is confirmed to support bidiGenerateContent (Live API)
-    @AppStorage("geminiModel") private var geminiModel = "gemini-2.0-flash-exp"
+    // gemini-2.5-flash-native-audio-preview-12-2025 is the GA native audio model for Live API voice conversations
+    @AppStorage("geminiModel") private var geminiModel = "gemini-2.5-flash-native-audio-preview-12-2025"
     @AppStorage("didMigrateGeminiModelDefault") private var didMigrateGeminiModelDefault = false
     @AppStorage("didMigrateGeminiModelDefaultV2") private var didMigrateGeminiModelDefaultV2 = false
     @AppStorage("didMigrateGeminiModelDefaultV3") private var didMigrateGeminiModelDefaultV3 = false
     @AppStorage("didMigrateGeminiModelDefaultV4") private var didMigrateGeminiModelDefaultV4 = false
+    @AppStorage("didMigrateGeminiModelDefaultV5") private var didMigrateGeminiModelDefaultV5 = false
     @AppStorage("geminiLiveEndpoint") private var geminiLiveEndpoint = ""
     @AppStorage("customMcpEnabled") private var customMcpEnabled = true
     @AppStorage("customMcpServerUrl") private var customMcpServerUrl = ""
@@ -167,14 +168,24 @@ struct ContentView: View {
             didMigrateGeminiModelDefaultV3 = true
         }
 
-        // Migration V4: Try gemini-2.0-flash-exp which is confirmed to support bidiGenerateContent
+        // Migration V4: (legacy - superseded by V5)
         if !didMigrateGeminiModelDefaultV4 {
             didMigrateGeminiModelDefaultV4 = true
+        }
+
+        // Migration V5: Upgrade to Gemini 2.5 Flash Native Audio (latest model for Live API)
+        if !didMigrateGeminiModelDefaultV5 {
+            didMigrateGeminiModelDefaultV5 = true
             let trimmed = geminiModel.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Switch to gemini-2.0-flash-exp for better Live API support
-            if trimmed.contains("native-audio-preview") {
-                geminiModel = "gemini-2.0-flash-exp"
-                print("🔄 Migrated model to gemini-2.0-flash-exp for better Live API support")
+            // Migrate from older models to the latest native audio model
+            let oldModels = Set([
+                "gemini-2.0-flash-exp",
+                "models/gemini-2.0-flash-exp",
+                "gemini-2.5-flash-native-audio-preview-09-2025"
+            ])
+            if oldModels.contains(trimmed) || trimmed.contains("native-audio-preview") {
+                geminiModel = "gemini-2.5-flash-native-audio-preview-12-2025"
+                print("🔄 Migrated model to gemini-2.5-flash-native-audio-preview-12-2025 (latest Live API model)")
             }
         }
     }
@@ -688,7 +699,7 @@ struct OptionsView: View {
                         SecureField("Enter Gemini API Key", text: $geminiApiKey)
                             .autocapitalization(.none)
 
-                        TextField("Model (e.g. gemini-2.0-flash-exp)", text: $geminiModel)
+                        TextField("Model (e.g. gemini-2.5-flash-native-audio)", text: $geminiModel)
                             .autocapitalization(.none)
                             .autocorrectionDisabled()
 

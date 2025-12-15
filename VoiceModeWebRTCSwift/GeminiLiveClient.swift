@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UIKit
 
 protocol GeminiLiveClientDelegate: AnyObject {
     func geminiLiveClient(_ client: GeminiLiveClient, didChangeStatus status: ConnectionStatus)
@@ -7,6 +8,8 @@ protocol GeminiLiveClientDelegate: AnyObject {
     func geminiLiveClient(_ client: GeminiLiveClient, didEncounterError error: Error)
 }
 
+/// Minimal Gemini Live client for BidiGenerateContent.
+/// Connects to the v1beta WS, sends setup, streams 16k PCM, and plays 24k PCM responses.
 final class GeminiLiveClient: NSObject {
     weak var delegate: GeminiLiveClientDelegate?
 
@@ -21,8 +24,6 @@ final class GeminiLiveClient: NSObject {
     private var isConnected: Bool = false
     private var isReadyForAudio: Bool = false
     private var isAwaitingModelResponse: Bool = false
-    private var remainingEndpointCandidates: [String] = []
-    private var currentEndpointAttempt: String?
 
     private let audioEngine = AVAudioEngine()
     private var inputNode: AVAudioInputNode?
@@ -31,42 +32,33 @@ final class GeminiLiveClient: NSObject {
     private let playbackStateLock = NSLock()
     private var pendingPlaybackBuffers: Int = 0
 
-    // Gemini Live uses 24kHz for both input and output audio
-    private let desiredInputSampleRate: Double = 24000
+    private let desiredInputSampleRate: Double = 16000
     private var audioConverter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
     private var converterOutputFormat: AVAudioFormat?
-
-    // Gemini Live API WebSocket endpoint - based on working Pipecat SDK implementation
-    // Key differences from regular API: uses preprod host and v1alpha
-    private static let defaultEndpointUrlString = "wss://preprod-generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
-
+    private var tapCallbackCount = 0
+    private var audioChunkCounter = 0
     private let maximumMicGain: Float = 10.0
-    private let vadSpeechRmsThreshold: Float = 0.012  // Lower for iPhone mics (was 0.02)
-    private let vadContinueRmsThreshold: Float = 0.008  // Lower for quiet rooms (was 0.015)
-    private let vadSilenceDurationSeconds: TimeInterval = 0.4  // Faster response (was 0.75)
-    private var vadHasDetectedSpeechInCurrentTurn: Bool = false
-    private var vadSilenceBeganUptime: TimeInterval?
     private var nextRmsLogUptime: TimeInterval = 0
-    private var currentTurnStartUptime: TimeInterval?
-    private var currentTurnAudioChunksSent: Int = 0
-    private var currentTurnAudioBytesSent: Int = 0
-    private var responseTimeoutTimer: Timer?
-    private let responseTimeoutSeconds: TimeInterval = 10.0
 
-    init(apiKey: String, model: String, systemPrompt: String, endpointUrlString: String = GeminiLiveClient.defaultEndpointUrlString) {
+    init(apiKey: String, model: String, systemPrompt: String) {
         self.apiKey = apiKey
-        self.model = model
+        self.model = model.hasPrefix("models/") ? model : "models/\(model)"
         self.systemPrompt = systemPrompt
-        self.endpointUrlString = endpointUrlString
+        self.endpointUrlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
         super.init()
         setupAudioSession()
     }
 
     deinit {
-        disconnect()
+        audioEngine.stop()
+        inputNode?.removeTap(onBus: 0)
+        playerNode?.stop()
+        webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        urlSession?.invalidateAndCancel()
     }
 
+    // MARK: - Public API
     func connect() {
         teardownConnection(notify: false)
 
@@ -78,51 +70,15 @@ final class GeminiLiveClient: NSObject {
             return
         }
 
-        let trimmedEndpoint = endpointUrlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        remainingEndpointCandidates = endpointCandidates(from: trimmedEndpoint)
-        guard !remainingEndpointCandidates.isEmpty else {
+        guard let url = URL(string: endpointUrlString) else {
             delegate?.geminiLiveClient(
                 self,
-                didEncounterError: NSError(domain: "GeminiLiveClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Gemini Live WebSocket URL is missing"])
+                didEncounterError: NSError(domain: "GeminiLiveClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid Gemini Live endpoint URL"])
             )
             return
         }
 
         delegate?.geminiLiveClient(self, didChangeStatus: .connecting)
-
-        connectNextEndpoint()
-    }
-
-    private func connectNextEndpoint() {
-        teardownConnection(notify: false)
-
-        guard !apiKey.isEmpty else { return }
-        guard !remainingEndpointCandidates.isEmpty else {
-            delegate?.geminiLiveClient(
-                self,
-                didEncounterError: NSError(domain: "GeminiLiveClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "No valid Gemini Live endpoints to try"])
-            )
-            return
-        }
-
-        var endpoint = remainingEndpointCandidates.removeFirst()
-        
-        // Add API key as query parameter (required for Gemini Live WebSocket)
-        if !apiKey.isEmpty {
-            let separator = endpoint.contains("?") ? "&" : "?"
-            endpoint = "\(endpoint)\(separator)key=\(apiKey)"
-            print("🔑 Using query parameter authentication (?key=...)")
-        }
-        
-        currentEndpointAttempt = endpoint
-
-        print("🔌 Gemini Live WS connecting: \(endpoint.replacingOccurrences(of: apiKey, with: "***API_KEY***"))")
-        print("📋 Model: \(model) (will be sent in setup message)")
-
-        guard let url = URL(string: endpoint) else {
-            connectNextEndpoint()
-            return
-        }
 
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = true
@@ -131,6 +87,7 @@ final class GeminiLiveClient: NSObject {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
+        request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
 
         webSocketTask = session.webSocketTask(with: request)
         webSocketTask?.resume()
@@ -143,10 +100,8 @@ final class GeminiLiveClient: NSObject {
     func sendText(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-
         guard isConnected else { return }
 
-        // Send turn content first
         let turnMessage: [String: Any] = [
             "clientContent": [
                 "turns": [
@@ -160,385 +115,70 @@ final class GeminiLiveClient: NSObject {
             ]
         ]
         sendJSON(turnMessage)
-        
-        // Then send turn complete separately
+
         let completeMessage: [String: Any] = [
             "clientContent": [
                 "turnComplete": true
             ]
         ]
         sendJSON(completeMessage)
-        
+
         isAwaitingModelResponse = true
     }
 
+    // MARK: - Setup
     private func sendSetup() {
         guard isConnected else { return }
 
-        // Model name must be prefixed with "models/"
-        let modelName = model.hasPrefix("models/") ? model : "models/\(model)"
-
-        // Setup format matching working Pipecat SDK exactly
-        // Note: Pipecat does NOT send systemInstruction in setup - it sends it as separate text messages
-        // Note: Pipecat does NOT send response_modalities - preprod endpoint defaults to audio
         let setupDict: [String: Any] = [
-            "model": modelName,
+            "model": model,
             "generationConfig": [
-                "speech_config": [
-                    "voice_config": [
-                        "prebuilt_voice_config": [
-                            "voice_name": "Puck"
+                "responseModalities": ["AUDIO"],
+                "speechConfig": [
+                    "voiceConfig": [
+                        "prebuiltVoiceConfig": [
+                            "voiceName": "Puck"
                         ]
                     ]
                 ]
-            ]
+            ],
+            "systemInstruction": systemPrompt
         ]
 
         let message: [String: Any] = [
             "setup": setupDict
         ]
 
-        print("📤 Sending Gemini Live setup (Pipecat-style)")
-        print("📤 Model: \(modelName)")
         if let jsonData = try? JSONSerialization.data(withJSONObject: message, options: .prettyPrinted),
            let jsonString = String(data: jsonData, encoding: .utf8) {
             print("📤 Setup JSON: \(jsonString)")
         }
         sendJSON(message)
-        
-        // Send system prompt as a separate text message (like Pipecat does)
-        if !systemPrompt.isEmpty {
-            sendSystemPromptAsText()
-        }
-    }
-    
-    private func sendSystemPromptAsText() {
-        // Pipecat sends initial context as TextInput messages after setup
-        let message: [String: Any] = [
-            "clientContent": [
-                "turns": [
-                    [
-                        "role": "user",
-                        "parts": [
-                            ["text": systemPrompt]
-                        ]
-                    ]
-                ],
-                "turnComplete": true
-            ]
-        ]
-        
-        print("📤 Sending system prompt as text message")
-        sendJSON(message)
     }
 
-    private var audioChunkCounter = 0
-    
-    private func sendAudioChunk(_ pcm16Data: Data, sampleRate: Int) {
-        // Pipecat SDK streams audio CONTINUOUSLY without any client-side VAD
-        // The Gemini server handles voice activity detection
-        guard isConnected else { return }
-        guard isReadyForAudio else { return }
-        // Don't check isAwaitingModelResponse - keep streaming, server handles interrupts
-        // Don't check isPlayingAssistantAudio - server handles barge-in
-        // Don't check vadHasDetectedSpeechInCurrentTurn - server has its own VAD
-
-        audioChunkCounter += 1
-        if audioChunkCounter == 1 {
-            print("🎤 Streaming audio to Gemini Live (\(pcm16Data.count) bytes @ \(sampleRate)Hz)")
-        }
-        if audioChunkCounter % 100 == 0 {
-            print("🎤 Sent \(audioChunkCounter) audio chunks")
-        }
-
-        let pcmDataToSend = pcm16Data
-        let sampleRateToSend = sampleRate
-        webSocketSendQueue.async { [weak self] in
-            guard let self else { return }
-            let base64 = pcmDataToSend.base64EncodedString()
-            // Use "mediaChunks" array format - this is what the working Pipecat SDK uses
-            let message: [String: Any] = [
-                "realtimeInput": [
-                    "mediaChunks": [
-                        [
-                            "mimeType": "audio/pcm;rate=\(sampleRateToSend)",
-                            "data": base64
-                        ]
-                    ]
-                ]
-            ]
-            self.sendJSONOnSendQueue(message)
-        }
-    }
-
-    private func sendAudioStreamEnd() {
-        // NOTE: The Pipecat SDK doesn't send any explicit end signal
-        // The Gemini server has its own VAD (voice activity detection)
-        // We just stop sending audio chunks and the server detects the silence
-        guard isConnected else { return }
-        guard isReadyForAudio else { return }
-        print("📤 End of speech turn (server VAD will detect this)")
-        print("⏳ Awaiting model response...")
-        
-        // Start timeout timer
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.responseTimeoutTimer?.invalidate()
-            self.responseTimeoutTimer = Timer.scheduledTimer(withTimeInterval: self.responseTimeoutSeconds, repeats: false) { [weak self] _ in
-                guard let self else { return }
-                if self.isAwaitingModelResponse {
-                    print("⚠️ Response timeout - no response from Gemini after \(self.responseTimeoutSeconds)s")
-                    print("⚠️ This might indicate an API issue, incorrect model name, or missing configuration")
-                    self.isAwaitingModelResponse = false
-                    self.vadHasDetectedSpeechInCurrentTurn = false
-                }
-            }
-        }
-    }
-
-    private func sendJSON(_ object: [String: Any]) {
-        webSocketSendQueue.async { [weak self] in
-            self?.sendJSONOnSendQueue(object)
-        }
-    }
-
-    private func sendJSONOnSendQueue(_ object: [String: Any]) {
-        guard let webSocketTask else {
-            print("⚠️ Cannot send JSON: WebSocket task is nil")
-            return
-        }
-        
-        guard webSocketTask.state == .running else {
-            print("⚠️ Cannot send JSON: WebSocket state is \(webSocketTask.state.rawValue) (not running)")
-            return
-        }
-        
-        guard JSONSerialization.isValidJSONObject(object) else {
-            print("⚠️ Invalid JSON object")
-            return
-        }
-        
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: object),
-              let jsonString = String(data: jsonData, encoding: .utf8) else {
-            print("⚠️ Failed to serialize JSON")
-            return
-        }
-
-        webSocketTask.send(.string(jsonString)) { [weak self] error in
-            guard let self else { return }
-            if let nsError = error as NSError? {
-                print("❌ Gemini Live send error: \(nsError.localizedDescription) (domain: \(nsError.domain) code: \(nsError.code))")
-                print("❌ Error details: \(nsError)")
-                if nsError.domain == NSPOSIXErrorDomain, nsError.code == 57 {
-                    print("❌ Socket not connected (POSIX 57) - connection was closed")
-                    self.teardownConnection(notify: true)
-                    return
-                }
-                self.delegate?.geminiLiveClient(self, didEncounterError: nsError)
-            } else {
-                print("✅ Message sent successfully")
-            }
-        }
-    }
-
-    private var messageCounter = 0
-    
-    private func receiveMessage() {
-        webSocketTask?.receive { [weak self] result in
-            guard let self else { return }
-
-            switch result {
-            case .success(let message):
-                self.messageCounter += 1
-                switch message {
-                case .string(let text):
-                    print("📨 Message #\(self.messageCounter) received (\(text.count) chars)")
-                    self.handleMessage(text)
-                case .data(let data):
-                    print("📨 Message #\(self.messageCounter) received (\(data.count) bytes as data)")
-                    if let text = String(data: data, encoding: .utf8) {
-                        self.handleMessage(text)
-                    } else {
-                        print("⚠️ Could not decode data as UTF-8")
-                    }
-                @unknown default:
-                    print("⚠️ Unknown message type")
-                    break
-                }
-
-                if self.isConnected {
-                    self.receiveMessage()
-                }
-
-            case .failure(let error):
-                let nsError = error as NSError
-                print("❌ WebSocket receive error: \(error.localizedDescription)")
-                print("❌ Error domain: \(nsError.domain), code: \(nsError.code)")
-                print("❌ Full error: \(nsError)")
-                self.delegate?.geminiLiveClient(self, didEncounterError: error)
-                self.disconnect()
-            }
-        }
-    }
-
-    private func handleMessage(_ text: String) {
-        print("📥 Received Gemini Live message (\(text.count) chars)")
-        print("📥 Full message: \(text)")
-        
-        guard let data = text.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            print("⚠️ Failed to parse message JSON")
-            print("⚠️ Raw message: \(text)")
-            return
-        }
-
-        // Handle setupComplete
-        if json["setupComplete"] != nil {
-            print("✅ Setup complete - ready to receive audio!")
-            isReadyForAudio = true
-            startAudio()
-            return
-        }
-
-        // Handle errors
-        if let error = json["error"] as? [String: Any] {
-            let code = error["code"] as? Int ?? -1
-            let message = (error["message"] as? String) ?? "Gemini Live error"
-            let status = error["status"] as? String ?? "UNKNOWN"
-            print("❌ Gemini Live API error:")
-            print("   Code: \(code)")
-            print("   Status: \(status)")
-            print("   Message: \(message)")
-            print("   Full error: \(error)")
-            delegate?.geminiLiveClient(
-                self,
-                didEncounterError: NSError(domain: "GeminiLiveClient", code: code, userInfo: [
-                    NSLocalizedDescriptionKey: message,
-                    "status": status,
-                    "fullError": error
-                ])
-            )
-            return
-        }
-
-        // Handle toolCall
-        if json["toolCall"] != nil {
-            print("🔧 Received tool call (not yet implemented)")
-            return
-        }
-
-        // Handle serverContent
-        guard let serverContent = json["serverContent"] as? [String: Any] else {
-            print("⚠️ Unhandled message type, keys: \(json.keys.joined(separator: ", "))")
-            print("⚠️ Full JSON: \(json)")
-            return
-        }
-
-        // Handle interruption
-        if let interrupted = serverContent["interrupted"] as? Bool, interrupted {
-            print("⚠️ Model was interrupted")
-            isAwaitingModelResponse = false
-            return
-        }
-
-        // Handle model turn with response
-        if let modelTurn = serverContent["modelTurn"] as? [String: Any],
-           let parts = modelTurn["parts"] as? [[String: Any]] {
-            print("✅ Received model turn with \(parts.count) parts")
-            
-            // Cancel timeout as we received a response
-            DispatchQueue.main.async { [weak self] in
-                self?.responseTimeoutTimer?.invalidate()
-                self?.responseTimeoutTimer = nil
-            }
-            
-            for part in parts {
-                if let text = part["text"] as? String, !text.isEmpty {
-                    print("💬 Received text: \(text)")
-                    let item = ConversationItem(id: UUID().uuidString, role: "assistant", text: text)
-                    delegate?.geminiLiveClient(self, didReceiveMessage: item)
-                }
-
-                if let inlineData = part["inlineData"] as? [String: Any],
-                   let mimeType = inlineData["mimeType"] as? String,
-                   let base64 = inlineData["data"] as? String,
-                   let audioData = Data(base64Encoded: base64) {
-                    print("🔊 Received audio: \(audioData.count) bytes, mimeType: \(mimeType)")
-                    let sampleRate = parseSampleRate(from: mimeType) ?? 24000
-                    playAudio(data: audioData, sampleRate: Double(sampleRate))
-                }
-            }
-        }
-
-        // Handle turnComplete
-        if serverContent["turnComplete"] != nil {
-            print("✅ Turn complete")
-            isAwaitingModelResponse = false
-            DispatchQueue.main.async { [weak self] in
-                self?.responseTimeoutTimer?.invalidate()
-                self?.responseTimeoutTimer = nil
-            }
-        }
-    }
-
-    private func parseSampleRate(from mimeType: String) -> Int? {
-        // Expected: "audio/pcm;rate=24000"
-        guard let rateRange = mimeType.range(of: "rate=") else { return nil }
-        let rateString = mimeType[rateRange.upperBound...]
-        return Int(rateString)
-    }
-
+    // MARK: - Audio capture
     private func setupAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setPreferredSampleRate(desiredInputSampleRate)
             try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
             try session.setActive(true)
+            print("🎤 Audio session initialized at \(session.sampleRate)Hz")
         } catch {
             delegate?.geminiLiveClient(self, didEncounterError: error)
         }
     }
 
-    private var tapCallbackCount = 0
-    
     private func startAudio() {
         guard isReadyForAudio else { return }
         stopAudio()
-        
         tapCallbackCount = 0
 
-        // Configure audio session FIRST
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
-            try session.setActive(true)
-            print("🎤 Audio session configured: \(session.sampleRate)Hz, inputs: \(session.availableInputs?.count ?? 0)")
-        } catch {
-            print("❌ Audio session setup failed: \(error)")
-        }
-
         inputNode = audioEngine.inputNode
-        guard let inputNode else {
-            print("❌ No input node available")
-            return
-        }
+        guard let inputNode else { return }
 
-        // DON'T enable voice processing - it can interfere with the tap
-        // Voice processing changes the audio graph and can prevent callbacks
-        print("🎤 Voice processing: DISABLED (to ensure tap works)")
-
-        // Get the format the input node will provide
         let tapFormat = inputNode.outputFormat(forBus: 0)
         converterInputFormat = tapFormat
-        print("🎤 Tap format: \(tapFormat.sampleRate)Hz, \(tapFormat.channelCount) ch, commonFormat: \(tapFormat.commonFormat.rawValue)")
-        
-        // Check if format is valid
-        if tapFormat.sampleRate == 0 {
-            print("❌ Invalid tap format - sample rate is 0!")
-            return
-        }
 
-        // Target format: 24kHz 16-bit PCM mono
         let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: desiredInputSampleRate,
@@ -548,34 +188,20 @@ final class GeminiLiveClient: NSObject {
         converterOutputFormat = targetFormat
         if let targetFormat {
             audioConverter = AVAudioConverter(from: tapFormat, to: targetFormat)
-            print("🎤 Audio converter: \(tapFormat.sampleRate)Hz -> \(targetFormat.sampleRate)Hz")
         } else {
             audioConverter = nil
-            print("⚠️ Could not create audio converter")
         }
 
-        // Buffer size: ~100ms of audio
         let bufferSize = UInt32(tapFormat.sampleRate / 10)
-        print("🎤 Installing tap with buffer size: \(bufferSize) frames")
-        
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: tapFormat) { [weak self] buffer, _ in
-            guard let self else { return }
-            self.tapCallbackCount += 1
-            if self.tapCallbackCount == 1 {
-                print("🎤 TAP CALLBACK #1 - frames: \(buffer.frameLength)")
-            }
-            if self.tapCallbackCount % 100 == 0 {
-                print("🎤 TAP CALLBACK #\(self.tapCallbackCount)")
-            }
-            self.processAudioInput(buffer: buffer)
+            self?.processAudioInput(buffer: buffer)
         }
-        print("🎤 Tap installed successfully")
 
         playerNode = AVAudioPlayerNode()
         if let playerNode {
             audioEngine.attach(playerNode)
             let defaultPlaybackFormat = AVAudioFormat(
-                commonFormat: .pcmFormatInt16,
+                commonFormat: .pcmFormatFloat32,
                 sampleRate: 24000,
                 channels: 1,
                 interleaved: false
@@ -586,9 +212,7 @@ final class GeminiLiveClient: NSObject {
 
         do {
             try audioEngine.start()
-            print("🎤 Audio engine started")
         } catch {
-            print("❌ Audio engine failed to start: \(error)")
             delegate?.geminiLiveClient(self, didEncounterError: error)
         }
     }
@@ -607,38 +231,12 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func processAudioInput(buffer: AVAudioPCMBuffer) {
-        // Debug: log first callback
-        if audioChunkCounter == 0 && !isConnected {
-            print("⚠️ Audio callback but not connected")
-        }
-        if audioChunkCounter == 0 && !isReadyForAudio {
-            print("⚠️ Audio callback but not ready for audio")
-        }
-        
-        guard isConnected else { return }
-        guard isReadyForAudio else { return }
-        
-        // Debug: confirm we passed the guards on first call
-        if audioChunkCounter == 0 {
-            print("🎤 First audio callback - processing...")
-        }
-        
-        // Pipecat SDK streams ALL audio continuously - server does VAD
-        // No client-side turn detection needed
+        guard isConnected, isReadyForAudio else { return }
 
-        // Debug RMS levels (every ~5 seconds)
-        let now = ProcessInfo.processInfo.systemUptime
-        if now >= nextRmsLogUptime {
-            nextRmsLogUptime = now + 5.0
-            let rawRms = listAudioLevels(buffer)
-            print("🎤 Audio Input RMS: \(rawRms) (streaming)")
-        }
-
-        // Apply microphone gain with a simple limiter to avoid clipping.
+        // Simple limiter
         if let channelData = buffer.floatChannelData {
             let frames = Int(buffer.frameLength)
             let channels = Int(buffer.format.channelCount)
-
             var maxAbs: Float = 0
             for channelIndex in 0..<channels {
                 let samples = channelData[channelIndex]
@@ -646,7 +244,6 @@ final class GeminiLiveClient: NSObject {
                     maxAbs = max(maxAbs, abs(samples[frameIndex]))
                 }
             }
-
             if maxAbs > 0 {
                 let limitedGain = min(maximumMicGain, 0.99 / maxAbs)
                 if limitedGain > 1.0 {
@@ -660,17 +257,20 @@ final class GeminiLiveClient: NSObject {
             }
         }
 
+        // Optional RMS logging
+        let now = ProcessInfo.processInfo.systemUptime
+        if now >= nextRmsLogUptime {
+            nextRmsLogUptime = now + 5.0
+            let rawRms = listAudioLevels(buffer)
+            print("🎤 Audio Input RMS: \(rawRms) (streaming)")
+        }
+
         if let converter = audioConverter,
            let inputFormat = converterInputFormat,
            let outputFormat = converterOutputFormat {
-            // Calculate output frame count based on sample rate ratio
             let ratio = outputFormat.sampleRate / inputFormat.sampleRate
             let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1)
-            
-            guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrameCapacity) else {
-                print("❌ Failed to create converted buffer")
-                return
-            }
+            guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrameCapacity) else { return }
 
             var conversionError: NSError?
             var didProvideInput = false
@@ -684,145 +284,240 @@ final class GeminiLiveClient: NSObject {
                 return buffer
             }
 
-            if let conversionError {
-                print("❌ Audio conversion error: \(conversionError.localizedDescription)")
+            if conversionError != nil || outputStatus == .error {
                 return
             }
-            
-            if outputStatus == .error {
-                print("❌ Audio conversion returned error status")
-                return
-            }
-            
-            // Set frameLength based on conversion ratio
-            let expectedFrames = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-            convertedBuffer.frameLength = expectedFrames
 
-            guard let int16Channel = convertedBuffer.int16ChannelData?[0] else {
-                print("❌ No int16 channel data after conversion")
-                return
-            }
-            
+            convertedBuffer.frameLength = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+            guard let int16Channel = convertedBuffer.int16ChannelData?[0] else { return }
             let byteCount = Int(convertedBuffer.frameLength) * MemoryLayout<Int16>.size
             let pcmData = Data(bytes: int16Channel, count: byteCount)
-            
-            // Debug: log first audio chunk details
-            if audioChunkCounter == 0 {
-                print("🎤 First audio chunk: \(buffer.frameLength) input frames -> \(convertedBuffer.frameLength) output frames")
-                print("🎤 Byte count: \(byteCount), sample rate: \(Int(outputFormat.sampleRate))")
-            }
-            
             sendAudioChunk(pcmData, sampleRate: Int(outputFormat.sampleRate))
             return
-        } else {
-            // Debug: log why conversion path wasn't taken
-            if audioChunkCounter == 0 {
-                print("⚠️ No converter available - converter: \(audioConverter != nil), inputFormat: \(converterInputFormat != nil), outputFormat: \(converterOutputFormat != nil)")
-            }
         }
 
-        if audioChunkCounter % 100 == 0 {
-            let rms = listAudioLevels(buffer)
-            print("🎤 Audio Input RMS: \(rms)")
-        }
-
-        // Fallback path without conversion
-        guard let pcmData = pcm16Data(from: buffer) else {
-            print("⚠️ Failed to get PCM data from buffer (frameLength: \(buffer.frameLength))")
-            return
-        }
+        guard let pcmData = pcm16Data(from: buffer) else { return }
         sendAudioChunk(pcmData, sampleRate: Int(buffer.format.sampleRate))
     }
 
-    private func updateTurnDetection(rms: Float) {
-        let now = ProcessInfo.processInfo.systemUptime
-
-        let isSpeech: Bool
-        if vadHasDetectedSpeechInCurrentTurn {
-            isSpeech = rms >= vadContinueRmsThreshold
-        } else {
-            isSpeech = rms >= vadSpeechRmsThreshold
+    private func listAudioLevels(_ buffer: AVAudioPCMBuffer) -> Float {
+        guard let channelData = buffer.floatChannelData?[0] else { return 0 }
+        let frameLength = Int(buffer.frameLength)
+        var sum: Float = 0
+        for i in 0..<frameLength {
+            sum += channelData[i] * channelData[i]
         }
-
-        if isSpeech {
-            if !vadHasDetectedSpeechInCurrentTurn {
-                currentTurnStartUptime = now
-                currentTurnAudioChunksSent = 0
-                currentTurnAudioBytesSent = 0
-                print("🎙️ Speech started (rms=\(rms))")
-            }
-            vadHasDetectedSpeechInCurrentTurn = true
-            vadSilenceBeganUptime = nil
-            return
-        }
-
-        guard vadHasDetectedSpeechInCurrentTurn else { return }
-
-        if vadSilenceBeganUptime == nil {
-            vadSilenceBeganUptime = now
-            return
-        }
-
-        guard let silenceBegan = vadSilenceBeganUptime else { return }
-        if now - silenceBegan >= vadSilenceDurationSeconds {
-            vadHasDetectedSpeechInCurrentTurn = false
-            vadSilenceBeganUptime = nil
-
-            guard !isAwaitingModelResponse else { return }
-            
-            if let start = currentTurnStartUptime {
-                let duration = ProcessInfo.processInfo.systemUptime - start
-                print("🎤 Ending speech turn (\(currentTurnAudioChunksSent) chunks, \(currentTurnAudioBytesSent) bytes, ~\(String(format: "%.2f", duration))s)")
-            } else {
-                print("🎤 Ending speech turn (\(currentTurnAudioChunksSent) chunks, \(currentTurnAudioBytesSent) bytes)")
-            }
-            currentTurnStartUptime = nil
-            currentTurnAudioChunksSent = 0
-            currentTurnAudioBytesSent = 0
-            
-            // CRITICAL: Send audioStreamEnd BEFORE setting awaiting flag
-            // Otherwise the guard in sendAudioStreamEnd will block it
-            sendAudioStreamEnd()
-            isAwaitingModelResponse = true
-        }
+        return sqrt(sum / Float(frameLength))
     }
 
     private func pcm16Data(from buffer: AVAudioPCMBuffer) -> Data? {
         guard buffer.format.commonFormat == .pcmFormatFloat32 else { return nil }
         guard let channelData = buffer.floatChannelData?[0] else { return nil }
-
         let frameCount = Int(buffer.frameLength)
         var samples = [Int16](repeating: 0, count: frameCount)
-
         for index in 0..<frameCount {
             let clamped = max(-1.0, min(1.0, channelData[index]))
             samples[index] = Int16(clamped * Float(Int16.max))
         }
-
         return samples.withUnsafeBytes { Data($0) }
     }
 
+    // MARK: - Send / Receive
+    private func sendAudioChunk(_ pcm16Data: Data, sampleRate: Int) {
+        guard isConnected else { return }
+        guard isReadyForAudio else { return }
+
+        audioChunkCounter += 1
+        if audioChunkCounter == 1 {
+            print("🎤 Streaming audio to Gemini Live (\(pcm16Data.count) bytes @ \(sampleRate)Hz)")
+        }
+        if audioChunkCounter % 100 == 0 {
+            print("🎤 Sent \(audioChunkCounter) audio chunks")
+        }
+
+        let pcmDataToSend = pcm16Data
+        webSocketSendQueue.async { [weak self] in
+            guard let self else { return }
+            let base64 = pcmDataToSend.base64EncodedString()
+            let message: [String: Any] = [
+                "realtimeInput": [
+                    "mediaChunks": [
+                        [
+                            "mimeType": "audio/pcm;rate=16000",
+                            "data": base64
+                        ]
+                    ]
+                ]
+            ]
+            self.sendJSONOnSendQueue(message)
+        }
+    }
+
+    private func sendAudioStreamEnd() {
+        guard isConnected else { return }
+        guard isReadyForAudio else { return }
+        print("📤 Ending speech turn and sending turnComplete")
+
+        let turnComplete: [String: Any] = [
+            "clientContent": [
+                "turnComplete": true
+            ]
+        ]
+        sendJSON(turnComplete)
+        isAwaitingModelResponse = true
+    }
+
+    private func sendJSON(_ object: [String: Any]) {
+        webSocketSendQueue.async { [weak self] in
+            self?.sendJSONOnSendQueue(object)
+        }
+    }
+
+    private func sendJSONOnSendQueue(_ object: [String: Any]) {
+        guard let webSocketTask else {
+            print("⚠️ Cannot send JSON: WebSocket task is nil")
+            return
+        }
+
+        guard webSocketTask.state == .running else {
+            print("⚠️ Cannot send JSON: WebSocket state is \(webSocketTask.state.rawValue) (not running)")
+            return
+        }
+
+        guard JSONSerialization.isValidJSONObject(object) else {
+            print("⚠️ Invalid JSON object")
+            return
+        }
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: object),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            print("⚠️ Failed to serialize JSON")
+            return
+        }
+
+        webSocketTask.send(.string(jsonString)) { [weak self] error in
+            guard let self else { return }
+            if let nsError = error as NSError? {
+                print("❌ Gemini Live send error: \(nsError.localizedDescription) (domain: \(nsError.domain) code: \(nsError.code))")
+                self.delegate?.geminiLiveClient(self, didEncounterError: nsError)
+            } else {
+                // Success (omit logging spam)
+            }
+        }
+    }
+
+    private func receiveMessage() {
+        webSocketTask?.receive { [weak self] result in
+            guard let self else { return }
+
+            switch result {
+            case .success(let message):
+                switch message {
+                case .string(let text):
+                    self.handleMessage(text)
+                case .data(let data):
+                    if let text = String(data: data, encoding: .utf8) {
+                        self.handleMessage(text)
+                    }
+                @unknown default:
+                    break
+                }
+
+                if self.isConnected {
+                    self.receiveMessage()
+                }
+
+            case .failure(let error):
+                let nsError = error as NSError
+                print("❌ WebSocket receive error: \(error.localizedDescription)")
+                self.delegate?.geminiLiveClient(self, didEncounterError: error)
+                self.disconnect()
+            }
+        }
+    }
+
+    private func handleMessage(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        // setupComplete
+        if json["setupComplete"] != nil {
+            print("✅ Setup complete - ready to stream audio")
+            isReadyForAudio = true
+            startAudio()
+            return
+        }
+
+        // errors
+        if let error = json["error"] as? [String: Any] {
+            let code = error["code"] as? Int ?? -1
+            let message = (error["message"] as? String) ?? "Gemini Live error"
+            delegate?.geminiLiveClient(
+                self,
+                didEncounterError: NSError(domain: "GeminiLiveClient", code: code, userInfo: [
+                    NSLocalizedDescriptionKey: message,
+                    "fullError": error
+                ])
+            )
+            return
+        }
+
+        // serverContent
+        guard let serverContent = json["serverContent"] as? [String: Any] else { return }
+
+        if serverContent["turnComplete"] != nil {
+            isAwaitingModelResponse = false
+        }
+
+        if let modelTurn = serverContent["modelTurn"] as? [String: Any],
+           let parts = modelTurn["parts"] as? [[String: Any]] {
+            for part in parts {
+                if let text = part["text"] as? String, !text.isEmpty {
+                    let item = ConversationItem(id: UUID().uuidString, role: "assistant", text: text)
+                    delegate?.geminiLiveClient(self, didReceiveMessage: item)
+                }
+
+                if let inlineData = part["inlineData"] as? [String: Any],
+                   let mimeType = inlineData["mimeType"] as? String,
+                   let base64 = inlineData["data"] as? String,
+                   let audioData = Data(base64Encoded: base64) {
+                    let sampleRate = parseSampleRate(from: mimeType) ?? 24000
+                    playAudio(data: audioData, sampleRate: Double(sampleRate))
+                }
+            }
+        }
+    }
+
+    private func parseSampleRate(from mimeType: String) -> Int? {
+        guard let rateRange = mimeType.range(of: "rate=") else { return nil }
+        let rateString = mimeType[rateRange.upperBound...]
+        return Int(rateString)
+    }
+
+    // MARK: - Playback
     private func playAudio(data: Data, sampleRate: Double) {
         guard let playerNode else { return }
 
         let desiredFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: sampleRate, channels: 1, interleaved: false)
+
         if playbackFormat?.sampleRate != desiredFormat?.sampleRate {
             playbackStateLock.lock()
             pendingPlaybackBuffers = 0
             playbackStateLock.unlock()
+
             playerNode.stop()
-            audioEngine.stop()
             audioEngine.disconnectNodeInput(playerNode)
             audioEngine.disconnectNodeOutput(playerNode)
             playbackFormat = desiredFormat
+
             if let desiredFormat {
                 audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: desiredFormat)
             }
-            do {
-                try audioEngine.start()
-            } catch {
-                delegate?.geminiLiveClient(self, didEncounterError: error)
-                return
+
+            if !audioEngine.isRunning {
+                reinstallInputTapAndStartEngine()
             }
         }
 
@@ -832,18 +527,35 @@ final class GeminiLiveClient: NSObject {
         buffer.frameLength = frameCapacity
 
         guard let int16Channel = buffer.int16ChannelData?[0] else { return }
+        let byteCount = min(data.count, Int(buffer.frameLength) * MemoryLayout<Int16>.size)
         data.withUnsafeBytes { rawBuffer in
-            if let baseAddress = rawBuffer.baseAddress {
-                memcpy(int16Channel, baseAddress, data.count)
-            }
+            guard let base = rawBuffer.baseAddress else { return }
+            memcpy(int16Channel, base, byteCount)
         }
 
         incrementPendingPlaybackBuffers()
-        playerNode.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
+        playerNode.scheduleBuffer(buffer, completionHandler: { [weak self] in
             self?.decrementPendingPlaybackBuffers()
-        }
+        })
+
         if !playerNode.isPlaying {
             playerNode.play()
+        }
+    }
+
+    private func reinstallInputTapAndStartEngine() {
+        audioEngine.stop()
+        inputNode?.removeTap(onBus: 0)
+        let inputNode = audioEngine.inputNode
+        let tapFormat = inputNode.outputFormat(forBus: 0)
+        let bufferSize = UInt32(tapFormat.sampleRate / 10)
+        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: tapFormat) { [weak self] buffer, _ in
+            self?.processAudioInput(buffer: buffer)
+        }
+        do {
+            try audioEngine.start()
+        } catch {
+            delegate?.geminiLiveClient(self, didEncounterError: error)
         }
     }
 
@@ -859,36 +571,15 @@ final class GeminiLiveClient: NSObject {
         playbackStateLock.unlock()
     }
 
-    private func isPlayingAssistantAudio() -> Bool {
-        playbackStateLock.lock()
-        let isPlaying = pendingPlaybackBuffers > 0
-        playbackStateLock.unlock()
-        return isPlaying
-    }
-
-    private func redactApiKey(_ urlString: String) -> String {
-        guard var components = URLComponents(string: urlString) else { return urlString }
-        guard let items = components.queryItems, !items.isEmpty else { return urlString }
-
-        components.queryItems = items.map { item in
-            guard item.name.lowercased() == "key", let value = item.value, !value.isEmpty else { return item }
-            return URLQueryItem(name: item.name, value: "REDACTED")
-        }
-        return components.string ?? urlString
-    }
-
+    // MARK: - Connection teardown
     private func teardownConnection(notify: Bool) {
         let hadActiveTask = (webSocketTask != nil)
 
         isConnected = false
         isReadyForAudio = false
         isAwaitingModelResponse = false
-        vadHasDetectedSpeechInCurrentTurn = false
-        vadSilenceBeganUptime = nil
-        nextRmsLogUptime = 0
         stopAudio()
-        
-        // Clean up timeout timer
+
         DispatchQueue.main.async { [weak self] in
             self?.responseTimeoutTimer?.invalidate()
             self?.responseTimeoutTimer = nil
@@ -904,184 +595,37 @@ final class GeminiLiveClient: NSObject {
         }
     }
 
-    private func endpointCandidates(from endpoint: String) -> [String] {
-        // Gemini Live API WebSocket format (based on working Pipecat SDK):
-        // wss://preprod-generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={API_KEY}
-        // Key: uses "preprod-" host and "v1alpha" (not v1beta)
-        // The model is specified in the setup message, NOT in the URL
-        
-        var candidates: [String] = []
-        
-        // Use provided endpoint if it looks valid (contains BidiGenerateContent or /ws/)
-        if !endpoint.isEmpty && (endpoint.contains("BidiGenerateContent") || endpoint.contains("/ws/")) {
-            candidates.append(endpoint)
-        }
-
-        // Primary: preprod endpoint with v1alpha (this is what works!)
-        candidates.append("wss://preprod-generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent")
-        
-        // Fallback: production endpoint (may not work for all features)
-        candidates.append("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent")
-        
-        print("🔍 Prepared \(candidates.count) Gemini Live endpoint candidates:")
-        for (index, candidate) in candidates.enumerated() {
-            print("   \(index + 1). \(candidate)")
-        }
-        print("📋 Model will be specified in setup message: \(model)")
-
-        return candidates
-    }
-
-    private func probeHttpError(for webSocketEndpoint: String) {
-        var urlString = webSocketEndpoint
-        if urlString.hasPrefix("wss://") {
-            urlString = "https://" + String(urlString.dropFirst("wss://".count))
-        } else if urlString.hasPrefix("ws://") {
-            urlString = "http://" + String(urlString.dropFirst("ws://".count))
-        }
-        
-        // API key should already be in the URL as query parameter
-
-        guard let url = URL(string: urlString) else { return }
-
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 10
-        request.httpMethod = "GET"
-        request.setValue("application/json", forHTTPHeaderField: "accept")
-
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let http = response as? HTTPURLResponse {
-                var bodyPreview: String = "<no data>"
-                
-                if let data, !data.isEmpty {
-                    // Try to decompress if gzipped
-                    var decodedData = data
-                    if let contentEncoding = http.allHeaderFields["Content-Encoding"] as? String,
-                       contentEncoding.lowercased().contains("gzip") {
-                        // Data might be gzipped - try to decompress
-                        do {
-                            decodedData = try (data as NSData).decompressed(using: .zlib) as Data
-                            print("🔎 Decompressed gzipped response: \(decodedData.count) bytes")
-                        } catch {
-                            print("🔎 Could not decompress gzip: \(error)")
-                        }
-                    }
-                    
-                    let prefix = decodedData.prefix(2048)
-                    bodyPreview = String(data: prefix, encoding: .utf8) ?? "<non-utf8 body \(prefix.count) bytes>"
-                }
-                
-                print("🔎 Gemini Live probe HTTP \(http.statusCode)")
-                print("🔎 Headers: \(http.allHeaderFields)")
-                print("🔎 Body: \(bodyPreview)")
-            } else if let error {
-                print("🔎 Gemini Live probe failed for \(urlString): \(error.localizedDescription)")
-            }
-        }.resume()
-    }
+    private var responseTimeoutTimer: Timer?
 }
 
 extension GeminiLiveClient: URLSessionWebSocketDelegate, URLSessionTaskDelegate {
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol proto: String?) {
         guard session === urlSession, webSocketTask === self.webSocketTask else { return }
-
-        print("✅ Gemini Live WebSocket opened successfully (protocol: \(`protocol` ?? "none"))")
+        print("✅ Gemini Live WebSocket opened successfully (protocol: \(proto ?? "none"))")
         isConnected = true
         isReadyForAudio = false
         isAwaitingModelResponse = false
         delegate?.geminiLiveClient(self, didChangeStatus: .connected)
 
         receiveMessage()
-        
-        // Add a small delay before sending setup to ensure socket is ready for writes
+
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.25) { [weak self] in
             guard let self = self, self.isConnected else { return }
             self.sendSetup()
         }
     }
-    
-    // Helper to calculate RMS for debugging
-    private func listAudioLevels(_ buffer: AVAudioPCMBuffer) -> Float {
-        guard let channelData = buffer.floatChannelData?[0] else { return 0 }
-        let frameLength = Int(buffer.frameLength)
-        var sum: Float = 0
-        for i in 0..<frameLength {
-            sum += channelData[i] * channelData[i]
-        }
-        return sqrt(sum / Float(frameLength))
-    }
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         guard session === urlSession, webSocketTask === self.webSocketTask else { return }
-        let reasonString = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "no reason"
-        
-        print(String(repeating: "=", count: 60))
-        print("🔌 WEBSOCKET CLOSED")
-        print("   Close Code: \(closeCode.rawValue)")
-        print("   Reason: \(reasonString)")
-        
-        // Log additional details for debugging
-        if let reason = reason, !reason.isEmpty {
-            print("   Reason bytes: \(reason.map { String(format: "%02x", $0) }.joined(separator: " "))")
-            print("   Reason data: \(reason as NSData)")
-        }
-        
-        // Check if this is an abnormal closure
-        if closeCode == .abnormalClosure || closeCode == .internalServerError {
-            print("   ⚠️ ABNORMAL CLOSURE - server rejected connection")
-        }
-        print(String(repeating: "=", count: 60))
-        
-        // If we haven't successfully established a session (or just connected and closed), try next candidate
-        if !remainingEndpointCandidates.isEmpty {
-             print("⚠️ WebSocket closed, trying next endpoint candidate...")
-             connectNextEndpoint()
-             return
-        }
-        
+        print("🔌 WebSocket closed code=\(closeCode.rawValue)")
         teardownConnection(notify: true)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard session === urlSession, task === webSocketTask else { return }
-        
-        if error == nil {
-            print("✅ Gemini Live WebSocket task completed successfully")
-            return
-        }
-        
-        guard let error else { return }
-
-        if let response = task.response as? HTTPURLResponse {
-            print("❌ Gemini Live handshake HTTP \(response.statusCode) headers: \(response.allHeaderFields)")
-            
-            if !remainingEndpointCandidates.isEmpty {
-                print("⚠️ HTTP \(response.statusCode), trying next endpoint candidate...")
-                connectNextEndpoint()
-                return
-            }
-            
-            if response.statusCode == 404 || response.statusCode == 400 {
-                let endpoint = currentEndpointAttempt ?? "unknown endpoint"
-                probeHttpError(for: endpoint)
-            }
-            
-            let endpoint = currentEndpointAttempt ?? "unknown endpoint"
-            let message = "Gemini Live WebSocket handshake failed (HTTP \(response.statusCode)) for \(endpoint)."
-            let wrapped = NSError(domain: "GeminiLiveClient", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: message])
-            delegate?.geminiLiveClient(self, didEncounterError: wrapped)
-        } else {
-            print("❌ Gemini Live WebSocket error: \(error.localizedDescription)")
-            
-            if !remainingEndpointCandidates.isEmpty {
-                print("⚠️ Connection error, trying next endpoint candidate...")
-                connectNextEndpoint()
-                return
-            }
-            
+        if let error {
             delegate?.geminiLiveClient(self, didEncounterError: error)
         }
-
         teardownConnection(notify: true)
     }
 }

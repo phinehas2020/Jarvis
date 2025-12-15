@@ -3279,7 +3279,7 @@ class WebRTCManager: NSObject, ObservableObject {
                 let errorItem = ConversationItem(
                     id: UUID().uuidString,
                     role: "system",
-                    text: "Error: Gemini model is required (e.g. gemini-2.0-flash-exp)."
+                    text: "Error: Gemini model is required (e.g. gemini-2.5-flash-native-audio)."
                 )
                 DispatchQueue.main.async {
                     self.conversation.append(errorItem)
@@ -3297,12 +3297,7 @@ class WebRTCManager: NSObject, ObservableObject {
             self.currentApiKey = apiKey
 
             geminiClient?.disconnect()
-            let client: GeminiLiveClient
-            if resolvedEndpoint.isEmpty {
-                client = GeminiLiveClient(apiKey: resolvedApiKey, model: resolvedModel, systemPrompt: systemMessage)
-            } else {
-                client = GeminiLiveClient(apiKey: resolvedApiKey, model: resolvedModel, systemPrompt: systemMessage, endpointUrlString: resolvedEndpoint)
-            }
+            let client = GeminiLiveClient(apiKey: resolvedApiKey, model: resolvedModel, systemPrompt: systemMessage)
             client.delegate = self
             geminiClient = client
 
@@ -3395,9 +3390,18 @@ class WebRTCManager: NSObject, ObservableObject {
         audioTrack = nil
         videoTrack = nil
 
-        geminiClient?.disconnect()
-        geminiClient = nil
-        
+        // Disconnect Gemini client but delay nil-ing to allow audio callbacks to complete
+        if let client = geminiClient {
+            client.disconnect()
+            // Delay deallocation slightly to let any pending audio callbacks complete
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                // Only nil if still the same client (not reconnected)
+                if self?.geminiClient === client {
+                    self?.geminiClient = nil
+                }
+            }
+        }
+
         connectionStatus = .disconnected
         currentApiKey = ""
         awaitingToolResponse = false
