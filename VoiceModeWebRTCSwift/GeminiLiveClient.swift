@@ -217,24 +217,20 @@ final class GeminiLiveClient: NSObject {
     private var audioChunkCounter = 0
     
     private func sendAudioChunk(_ pcm16Data: Data, sampleRate: Int) {
+        // Pipecat SDK streams audio CONTINUOUSLY without any client-side VAD
+        // The Gemini server handles voice activity detection
         guard isConnected else { return }
         guard isReadyForAudio else { return }
-        guard !isAwaitingModelResponse else { return }
-        guard !isPlayingAssistantAudio() else { return }
-        guard vadHasDetectedSpeechInCurrentTurn else { return }
-
-        if currentTurnAudioChunksSent == 0 {
-            print("🎤 Sending first audio chunk (\(pcm16Data.count) bytes @ \(sampleRate)Hz)")
-        }
-
-        currentTurnAudioChunksSent += 1
-        currentTurnAudioBytesSent += pcm16Data.count
+        // Don't check isAwaitingModelResponse - keep streaming, server handles interrupts
+        // Don't check isPlayingAssistantAudio - server handles barge-in
+        // Don't check vadHasDetectedSpeechInCurrentTurn - server has its own VAD
 
         audioChunkCounter += 1
+        if audioChunkCounter == 1 {
+            print("🎤 Streaming audio to Gemini Live (\(pcm16Data.count) bytes @ \(sampleRate)Hz)")
+        }
         if audioChunkCounter % 100 == 0 {
-             // We can't calculate RMS from Data easily here efficiently without decoding,
-             // but we will rely on the fact that we are sending data.
-            print("🎤 Sent \(audioChunkCounter) audio chunks (\(pcm16Data.count) bytes @ \(sampleRate)Hz)")
+            print("🎤 Sent \(audioChunkCounter) audio chunks")
         }
 
         let pcmDataToSend = pcm16Data
@@ -548,28 +544,17 @@ final class GeminiLiveClient: NSObject {
     private func processAudioInput(buffer: AVAudioPCMBuffer) {
         guard isConnected else { return }
         guard isReadyForAudio else { return }
+        
+        // Pipecat SDK streams ALL audio continuously - server does VAD
+        // No client-side turn detection needed
 
-        // IMPORTANT: Compute RMS pre-gain for VAD; boosting/clamping can prevent silence detection.
-        let rawRms = listAudioLevels(buffer)
-
-        // Debug RMS levels (every ~2 seconds)
+        // Debug RMS levels (every ~5 seconds)
         let now = ProcessInfo.processInfo.systemUptime
         if now >= nextRmsLogUptime {
-            nextRmsLogUptime = now + 2.0
-            print("🎤 Audio Input RMS: \(rawRms) (raw)")
+            nextRmsLogUptime = now + 5.0
+            let rawRms = listAudioLevels(buffer)
+            print("🎤 Audio Input RMS: \(rawRms) (streaming)")
         }
-
-        if isAwaitingModelResponse || isPlayingAssistantAudio() {
-            return
-        }
-
-        updateTurnDetection(rms: rawRms)
-        if isAwaitingModelResponse {
-            return
-        }
-
-        // Only send microphone audio once VAD considers us "in speech" for this turn.
-        guard vadHasDetectedSpeechInCurrentTurn else { return }
 
         // Apply microphone gain with a simple limiter to avoid clipping.
         if let channelData = buffer.floatChannelData {
