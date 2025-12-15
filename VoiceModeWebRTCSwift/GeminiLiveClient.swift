@@ -44,6 +44,12 @@ final class GeminiLiveClient: NSObject {
     private let maximumMicGain: Float = 10.0
     private var nextRmsLogUptime: TimeInterval = 0
 
+    // VAD Configuration
+    private var lastSpeechTimestamp: TimeInterval = 0
+    private var isUserSpeaking: Bool = false
+    private let silenceThreshold: TimeInterval = 0.75 // 750ms silence triggers end of turn
+    private let speechThreshold: Float = 0.015
+
     init(apiKey: String, model: String, systemPrompt: String, tools: [[String: Any]] = []) {
         self.apiKey = apiKey
         self.model = model.hasPrefix("models/") ? model : "models/\(model)"
@@ -359,11 +365,33 @@ final class GeminiLiveClient: NSObject {
             }
         }
 
-        // Optional RMS logging
+        // Calculate RMS for VAD
+        let rawRms = listAudioLevels(buffer)
+
+        // VAD (Voice Activity Detection) logic
         let now = ProcessInfo.processInfo.systemUptime
+        if rawRms > speechThreshold {
+            lastSpeechTimestamp = now
+            if !isUserSpeaking {
+                isUserSpeaking = true
+                print("🎤 User started speaking (RMS: \(rawRms))")
+            }
+        } else {
+            // Silence detected
+            if isUserSpeaking && (now - lastSpeechTimestamp > silenceThreshold) {
+                isUserSpeaking = false
+                print("🎤 User stopped speaking (Silence detected)")
+
+                // Only send turnComplete if we are not already waiting for a response
+                if !isAwaitingModelResponse {
+                    sendAudioStreamEnd()
+                }
+            }
+        }
+
+        // Optional RMS logging
         if now >= nextRmsLogUptime {
             nextRmsLogUptime = now + 5.0
-            let rawRms = listAudioLevels(buffer)
             print("🎤 Audio Input RMS: \(rawRms) (streaming)")
         }
 
