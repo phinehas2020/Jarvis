@@ -235,7 +235,7 @@ final class GeminiLiveClient: NSObject {
         var setupDict: [String: Any] = [
             "model": model,
             "generationConfig": [
-                "responseModalities": ["AUDIO"],
+                "responseModalities": ["AUDIO", "TEXT"],
                 "speechConfig": [
                     "voiceConfig": [
                         "prebuiltVoiceConfig": [
@@ -594,9 +594,21 @@ final class GeminiLiveClient: NSObject {
             return
         }
 
+        // Check for toolCall directly in the root (v1alpha variance)
+        if let toolCall = json["toolCall"] as? [String: Any],
+           let functionCalls = toolCall["functionCalls"] as? [[String: Any]] {
+            for call in functionCalls {
+                if let name = call["name"] as? String,
+                   let args = call["args"] as? [String: Any],
+                   let id = call["id"] as? String {
+                    print("🔧 Received tool call (root v1alpha): \(name) id: \(id)")
+                    delegate?.geminiLiveClient(self, didRequestToolExecution: name, args: args, callId: id)
+                }
+            }
+        }
+
         // serverContent
         guard let serverContent = json["serverContent"] as? [String: Any] else {
-            // Check for toolCall directly in the root or inside modelTurn if structure varies
             return
         }
 
