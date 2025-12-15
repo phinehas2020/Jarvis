@@ -489,22 +489,36 @@ final class GeminiLiveClient: NSObject {
         
         tapCallbackCount = 0
 
-        inputNode = audioEngine.inputNode
-        guard let inputNode else { return }
-
-        // Enable voice processing to ignore phone's own audio output (like Pipecat SDK)
+        // Configure audio session FIRST
         do {
-            try inputNode.setVoiceProcessingEnabled(true)
-            print("🎤 Voice processing enabled")
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+            try session.setActive(true)
+            print("🎤 Audio session configured: \(session.sampleRate)Hz, inputs: \(session.availableInputs?.count ?? 0)")
         } catch {
-            print("⚠️ Could not enable voice processing: \(error)")
+            print("❌ Audio session setup failed: \(error)")
         }
 
-        // IMPORTANT: Use outputFormat for tap (iOS requirement)
-        // inputFormat is what the hardware provides, outputFormat is what the node outputs after processing
+        inputNode = audioEngine.inputNode
+        guard let inputNode else {
+            print("❌ No input node available")
+            return
+        }
+
+        // DON'T enable voice processing - it can interfere with the tap
+        // Voice processing changes the audio graph and can prevent callbacks
+        print("🎤 Voice processing: DISABLED (to ensure tap works)")
+
+        // Get the format the input node will provide
         let tapFormat = inputNode.outputFormat(forBus: 0)
         converterInputFormat = tapFormat
-        print("🎤 Tap format: \(tapFormat.sampleRate)Hz, \(tapFormat.channelCount) channels, \(tapFormat.commonFormat.rawValue)")
+        print("🎤 Tap format: \(tapFormat.sampleRate)Hz, \(tapFormat.channelCount) ch, commonFormat: \(tapFormat.commonFormat.rawValue)")
+        
+        // Check if format is valid
+        if tapFormat.sampleRate == 0 {
+            print("❌ Invalid tap format - sample rate is 0!")
+            return
+        }
 
         // Target format: 24kHz 16-bit PCM mono
         let targetFormat = AVAudioFormat(
