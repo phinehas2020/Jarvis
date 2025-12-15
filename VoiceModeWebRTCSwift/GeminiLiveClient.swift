@@ -35,7 +35,7 @@ final class GeminiLiveClient: NSObject {
     private let playbackStateLock = NSLock()
     private var pendingPlaybackBuffers: Int = 0
 
-    private let desiredInputSampleRate: Double = 16000
+    private let desiredInputSampleRate: Double = 24000
     private var audioConverter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
     private var converterOutputFormat: AVAudioFormat?
@@ -235,7 +235,7 @@ final class GeminiLiveClient: NSObject {
         var setupDict: [String: Any] = [
             "model": model,
             "generationConfig": [
-                "responseModalities": ["AUDIO", "TEXT"],
+                "responseModalities": ["AUDIO"],
                 "speechConfig": [
                     "voiceConfig": [
                         "prebuiltVoiceConfig": [
@@ -473,7 +473,7 @@ final class GeminiLiveClient: NSObject {
                 "realtimeInput": [
                     "mediaChunks": [
                         [
-                            "mimeType": "audio/pcm;rate=16000",
+                            "mimeType": "audio/pcm;rate=24000",
                             "data": base64
                         ]
                     ]
