@@ -481,9 +481,13 @@ final class GeminiLiveClient: NSObject {
         }
     }
 
+    private var tapCallbackCount = 0
+    
     private func startAudio() {
         guard isReadyForAudio else { return }
         stopAudio()
+        
+        tapCallbackCount = 0
 
         inputNode = audioEngine.inputNode
         guard let inputNode else { return }
@@ -496,33 +500,44 @@ final class GeminiLiveClient: NSObject {
             print("⚠️ Could not enable voice processing: \(error)")
         }
 
-        // Use inputFormat like Pipecat SDK does (not outputFormat)
-        let tapFormat = inputNode.inputFormat(forBus: 0)
+        // IMPORTANT: Use outputFormat for tap (iOS requirement)
+        // inputFormat is what the hardware provides, outputFormat is what the node outputs after processing
+        let tapFormat = inputNode.outputFormat(forBus: 0)
         converterInputFormat = tapFormat
-        print("🎤 Input format: \(tapFormat.sampleRate)Hz, \(tapFormat.channelCount) channels")
+        print("🎤 Tap format: \(tapFormat.sampleRate)Hz, \(tapFormat.channelCount) channels, \(tapFormat.commonFormat.rawValue)")
 
-        // Target format: 24kHz 16-bit PCM mono (matches Pipecat's AudioCommon.serverAudioFormat)
-        let outputFormat = AVAudioFormat(
+        // Target format: 24kHz 16-bit PCM mono
+        let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: desiredInputSampleRate,
             channels: 1,
             interleaved: false
         )
-        converterOutputFormat = outputFormat
-        if let outputFormat {
-            audioConverter = AVAudioConverter(from: tapFormat, to: outputFormat)
-            print("🎤 Audio converter: \(tapFormat.sampleRate)Hz -> \(outputFormat.sampleRate)Hz")
+        converterOutputFormat = targetFormat
+        if let targetFormat {
+            audioConverter = AVAudioConverter(from: tapFormat, to: targetFormat)
+            print("🎤 Audio converter: \(tapFormat.sampleRate)Hz -> \(targetFormat.sampleRate)Hz")
         } else {
             audioConverter = nil
             print("⚠️ Could not create audio converter")
         }
 
-        // Buffer size: 24000 / 10 = 2400 frames (like Pipecat SDK)
-        let bufferSize = UInt32(desiredInputSampleRate / 10)
+        // Buffer size: ~100ms of audio
+        let bufferSize = UInt32(tapFormat.sampleRate / 10)
+        print("🎤 Installing tap with buffer size: \(bufferSize) frames")
+        
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: tapFormat) { [weak self] buffer, _ in
-            self?.processAudioInput(buffer: buffer)
+            guard let self else { return }
+            self.tapCallbackCount += 1
+            if self.tapCallbackCount == 1 {
+                print("🎤 TAP CALLBACK #1 - frames: \(buffer.frameLength)")
+            }
+            if self.tapCallbackCount % 100 == 0 {
+                print("🎤 TAP CALLBACK #\(self.tapCallbackCount)")
+            }
+            self.processAudioInput(buffer: buffer)
         }
-        print("🎤 Installed audio tap with buffer size: \(bufferSize)")
+        print("🎤 Tap installed successfully")
 
         playerNode = AVAudioPlayerNode()
         if let playerNode {
