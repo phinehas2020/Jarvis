@@ -235,7 +235,7 @@ final class GeminiLiveClient: NSObject {
         var setupDict: [String: Any] = [
             "model": model,
             "generationConfig": [
-                "responseModalities": ["AUDIO"],
+                "responseModalities": ["AUDIO", "TEXT"],
                 "speechConfig": [
                     "voiceConfig": [
                         "prebuiltVoiceConfig": [
@@ -249,7 +249,7 @@ final class GeminiLiveClient: NSObject {
 
         if !geminiFunctionDeclarations.isEmpty {
             setupDict["tools"] = [
-                ["function_declarations": geminiFunctionDeclarations]
+                ["functionDeclarations": geminiFunctionDeclarations]
             ]
         }
 
