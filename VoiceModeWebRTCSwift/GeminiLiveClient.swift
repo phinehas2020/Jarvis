@@ -31,14 +31,15 @@ final class GeminiLiveClient: NSObject {
     private let playbackStateLock = NSLock()
     private var pendingPlaybackBuffers: Int = 0
 
-    private let desiredInputSampleRate: Double = 16000  // Gemini Live API expects 16kHz input
+    // Gemini Live uses 24kHz for both input and output audio
+    private let desiredInputSampleRate: Double = 24000
     private var audioConverter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
     private var converterOutputFormat: AVAudioFormat?
 
-    // Gemini Live API WebSocket endpoint - model is specified in setup message, not URL
-    // Format: wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={API_KEY}
-    private static let defaultEndpointUrlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+    // Gemini Live API WebSocket endpoint - based on working Pipecat SDK implementation
+    // Key differences from regular API: uses preprod host and v1alpha
+    private static let defaultEndpointUrlString = "wss://preprod-generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
 
     private let maximumMicGain: Float = 10.0
     private let vadSpeechRmsThreshold: Float = 0.012  // Lower for iPhone mics (was 0.02)
@@ -177,15 +178,15 @@ final class GeminiLiveClient: NSObject {
         // Model name must be prefixed with "models/"
         let modelName = model.hasPrefix("models/") ? model : "models/\(model)"
         
-        // Gemini Live API setup message format
+        // Setup format based on working Pipecat SDK implementation
+        // generationConfig contains the speech configuration directly
         var setupDict: [String: Any] = [
             "model": modelName,
             "generationConfig": [
-                "responseModalities": ["AUDIO"],
-                "speechConfig": [
-                    "voiceConfig": [
-                        "prebuiltVoiceConfig": [
-                            "voiceName": "Puck"
+                "speech_config": [
+                    "voice_config": [
+                        "prebuilt_voice_config": [
+                            "voice_name": "Puck"
                         ]
                     ]
                 ]
@@ -241,12 +242,14 @@ final class GeminiLiveClient: NSObject {
         webSocketSendQueue.async { [weak self] in
             guard let self else { return }
             let base64 = pcmDataToSend.base64EncodedString()
-            // Use "media" not "audio" - this is the correct format per Gemini Live API docs
+            // Use "mediaChunks" array format - this is what the working Pipecat SDK uses
             let message: [String: Any] = [
                 "realtimeInput": [
-                    "media": [
-                        "mimeType": "audio/pcm;rate=\(sampleRateToSend)",
-                        "data": base64
+                    "mediaChunks": [
+                        [
+                            "mimeType": "audio/pcm;rate=\(sampleRateToSend)",
+                            "data": base64
+                        ]
                     ]
                 ]
             ]
@@ -255,12 +258,13 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func sendAudioStreamEnd() {
+        // NOTE: The Pipecat SDK doesn't send any explicit end signal
+        // The Gemini server has its own VAD (voice activity detection)
+        // We just stop sending audio chunks and the server detects the silence
         guard isConnected else { return }
         guard isReadyForAudio else { return }
-        print("📤 Sending activityEnd")
+        print("📤 End of speech turn (server VAD will detect this)")
         print("⏳ Awaiting model response...")
-        // Use activityEnd to signal end of audio input (not audioStreamEnd)
-        sendJSON(["realtimeInput": ["activityEnd": [:]]])
         
         // Start timeout timer
         DispatchQueue.main.async { [weak self] in
@@ -834,8 +838,9 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func endpointCandidates(from endpoint: String) -> [String] {
-        // Gemini Live API WebSocket format:
-        // wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key={API_KEY}
+        // Gemini Live API WebSocket format (based on working Pipecat SDK):
+        // wss://preprod-generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={API_KEY}
+        // Key: uses "preprod-" host and "v1alpha" (not v1beta)
         // The model is specified in the setup message, NOT in the URL
         
         var candidates: [String] = []
@@ -845,8 +850,11 @@ final class GeminiLiveClient: NSObject {
             candidates.append(endpoint)
         }
 
-        // Primary: Global WebSocket endpoint for Gemini Live API
-        candidates.append("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")
+        // Primary: preprod endpoint with v1alpha (this is what works!)
+        candidates.append("wss://preprod-generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent")
+        
+        // Fallback: production endpoint (may not work for all features)
+        candidates.append("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent")
         
         print("🔍 Prepared \(candidates.count) Gemini Live endpoint candidates:")
         for (index, candidate) in candidates.enumerated() {
