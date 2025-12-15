@@ -47,8 +47,8 @@ final class GeminiLiveClient: NSObject {
     // VAD Configuration
     private var lastSpeechTimestamp: TimeInterval = 0
     private var isUserSpeaking: Bool = false
-    private let silenceThreshold: TimeInterval = 0.75 // 750ms silence triggers end of turn
-    private let speechThreshold: Float = 0.015
+    private let silenceThreshold: TimeInterval = 0.6 // 600ms silence triggers end of turn
+    private let speechThreshold: Float = 0.01
 
     init(apiKey: String, model: String, systemPrompt: String, tools: [[String: Any]] = []) {
         self.apiKey = apiKey
@@ -235,7 +235,7 @@ final class GeminiLiveClient: NSObject {
         var setupDict: [String: Any] = [
             "model": model,
             "generationConfig": [
-                "responseModalities": ["AUDIO"],
+                "responseModalities": ["AUDIO", "TEXT"],
                 "speechConfig": [
                     "voiceConfig": [
                         "prebuiltVoiceConfig": [
