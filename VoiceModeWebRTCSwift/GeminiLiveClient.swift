@@ -488,9 +488,20 @@ final class GeminiLiveClient: NSObject {
         inputNode = audioEngine.inputNode
         guard let inputNode else { return }
 
-        let tapFormat = inputNode.outputFormat(forBus: 0)
-        converterInputFormat = tapFormat
+        // Enable voice processing to ignore phone's own audio output (like Pipecat SDK)
+        do {
+            try inputNode.setVoiceProcessingEnabled(true)
+            print("🎤 Voice processing enabled")
+        } catch {
+            print("⚠️ Could not enable voice processing: \(error)")
+        }
 
+        // Use inputFormat like Pipecat SDK does (not outputFormat)
+        let tapFormat = inputNode.inputFormat(forBus: 0)
+        converterInputFormat = tapFormat
+        print("🎤 Input format: \(tapFormat.sampleRate)Hz, \(tapFormat.channelCount) channels")
+
+        // Target format: 24kHz 16-bit PCM mono (matches Pipecat's AudioCommon.serverAudioFormat)
         let outputFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: desiredInputSampleRate,
@@ -500,13 +511,18 @@ final class GeminiLiveClient: NSObject {
         converterOutputFormat = outputFormat
         if let outputFormat {
             audioConverter = AVAudioConverter(from: tapFormat, to: outputFormat)
+            print("🎤 Audio converter: \(tapFormat.sampleRate)Hz -> \(outputFormat.sampleRate)Hz")
         } else {
             audioConverter = nil
+            print("⚠️ Could not create audio converter")
         }
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: tapFormat) { [weak self] buffer, _ in
+        // Buffer size: 24000 / 10 = 2400 frames (like Pipecat SDK)
+        let bufferSize = UInt32(desiredInputSampleRate / 10)
+        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: tapFormat) { [weak self] buffer, _ in
             self?.processAudioInput(buffer: buffer)
         }
+        print("🎤 Installed audio tap with buffer size: \(bufferSize)")
 
         playerNode = AVAudioPlayerNode()
         if let playerNode {
@@ -523,7 +539,9 @@ final class GeminiLiveClient: NSObject {
 
         do {
             try audioEngine.start()
+            print("🎤 Audio engine started")
         } catch {
+            print("❌ Audio engine failed to start: \(error)")
             delegate?.geminiLiveClient(self, didEncounterError: error)
         }
     }
@@ -583,57 +601,41 @@ final class GeminiLiveClient: NSObject {
         }
 
         if let converter = audioConverter,
-           let inputFormat = converterInputFormat,
            let outputFormat = converterOutputFormat {
-            let ratio = outputFormat.sampleRate / inputFormat.sampleRate
-            let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1)
-            guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrameCapacity) else {
-                print("❌ Failed to create converted buffer")
-                return
-            }
-
+            // Match Pipecat SDK's conversion approach
+            let targetBuffer = AVAudioPCMBuffer(
+                pcmFormat: outputFormat,
+                frameCapacity: buffer.frameLength
+            )!
+            
             var conversionError: NSError?
-            var didProvideInput = false
-            let outputStatus = converter.convert(to: convertedBuffer, error: &conversionError) { _, outStatus in
-                if didProvideInput {
-                    outStatus.pointee = .endOfStream
-                    return nil
+            var inputIndex: AVAudioFramePosition = 0
+            converter.convert(to: targetBuffer, error: &conversionError) { numberOfFrames, inputStatus in
+                if inputIndex >= buffer.frameLength {
+                    inputStatus.pointee = .noDataNow
+                    return AVAudioBuffer()
                 }
-                didProvideInput = true
-                outStatus.pointee = .haveData
+                inputStatus.pointee = .haveData
+                inputIndex = AVAudioFramePosition(buffer.frameLength)
                 return buffer
             }
 
             if let conversionError {
                 print("❌ Audio conversion error: \(conversionError.localizedDescription)")
-                delegate?.geminiLiveClient(self, didEncounterError: conversionError)
                 return
             }
-            if outputStatus == .error {
-                print("❌ Audio conversion returned error status")
-                delegate?.geminiLiveClient(
-                    self,
-                    didEncounterError: NSError(domain: "GeminiLiveClient", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to convert microphone audio"])
-                )
-                return
-            }
+            
+            // Pipecat SDK hack: set frameLength to input frameLength
+            // "UGH this feels like a total hack. But somehow the format converter is assigning a nonsense frameLength"
+            targetBuffer.frameLength = buffer.frameLength
 
-            // CRITICAL FIX: AVAudioConverter doesn't set frameLength automatically
-            // We need to calculate it based on the expected conversion ratio
-            let expectedFrames = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-            convertedBuffer.frameLength = expectedFrames
-
-            // Check if we got valid data
-            if convertedBuffer.frameLength == 0 {
-                print("⚠️ Converted buffer has 0 frames (input had \(buffer.frameLength) frames)")
-                return
-            }
-
-            guard let int16Channel = convertedBuffer.int16ChannelData?[0] else {
+            guard let int16Channel = targetBuffer.int16ChannelData?[0] else {
                 print("❌ No int16 channel data after conversion")
                 return
             }
-            let byteCount = Int(convertedBuffer.frameLength) * MemoryLayout<Int16>.size
+            
+            // Extract data exactly like Pipecat SDK
+            let byteCount = Int(targetBuffer.frameLength * targetBuffer.format.streamDescription.pointee.mBytesPerFrame)
             let pcmData = Data(bytes: int16Channel, count: byteCount)
             sendAudioChunk(pcmData, sampleRate: Int(outputFormat.sampleRate))
             return
