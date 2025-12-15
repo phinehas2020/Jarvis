@@ -101,7 +101,7 @@ class WebRTCManager: NSObject, ObservableObject {
     private var geminiClient: GeminiLiveClient?
 
     // Private tool definitions helper
-    private func getLocalTools() -> [[String: Any]] {
+    func getLocalTools() -> [[String: Any]] {
         return [
             [
                 "type": "function",
@@ -2056,6 +2056,11 @@ class WebRTCManager: NSObject, ObservableObject {
 
     /// Helper to send a tool/function response to the realtime session
     private func sendFunctionCallOutput(previousItemId: String, callId: String, output: String) {
+        if currentProvider == .gemini {
+            geminiClient?.sendToolResponse(callId: callId, response: output)
+            return
+        }
+
         guard let dc = dataChannel, dc.readyState == .open else {
             print("❌ Data channel not ready to send function call output")
             return
@@ -3297,7 +3302,13 @@ class WebRTCManager: NSObject, ObservableObject {
             self.currentApiKey = apiKey
 
             geminiClient?.disconnect()
-            let client = GeminiLiveClient(apiKey: resolvedApiKey, model: resolvedModel, systemPrompt: systemMessage)
+
+            // Gather all tools for Gemini
+            var allTools: [[String: Any]] = []
+            allTools.append(contentsOf: getLocalTools())
+            allTools.append(contentsOf: mcpTools)
+
+            let client = GeminiLiveClient(apiKey: resolvedApiKey, model: resolvedModel, systemPrompt: systemMessage, tools: allTools)
             client.delegate = self
             geminiClient = client
 
@@ -4086,6 +4097,33 @@ extension WebRTCManager: GeminiLiveClientDelegate {
             )
             self.conversation.append(errorItem)
             self.connectionStatus = .disconnected
+        }
+    }
+
+    func geminiLiveClient(_ client: GeminiLiveClient, didRequestToolExecution tool: String, args: [String: Any], callId: String) {
+        print("🔧 Gemini requested tool: \(tool) callId: \(callId)")
+
+        // Convert args to JSON string to reuse handleLocalFunctionCall logic
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: args),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            print("❌ Failed to serialize arguments for tool: \(tool)")
+            return
+        }
+
+        // Check if it is a local tool
+        if localToolNames.contains(tool) {
+            handleLocalFunctionCall(itemId: "gemini-placeholder", callId: callId, name: tool, arguments: jsonString)
+        } else if mcpExpectedToolNames.contains(tool) || !mcpTools.isEmpty {
+            // MCP Logic
+            Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self else { return }
+                let output = await self.performMcpToolCall(name: tool, arguments: args)
+                await MainActor.run {
+                    self.sendFunctionCallOutput(previousItemId: "gemini-placeholder", callId: callId, output: output)
+                }
+            }
+        } else {
+            print("⚠️ Unknown Gemini tool call: \(tool)")
         }
     }
 }
