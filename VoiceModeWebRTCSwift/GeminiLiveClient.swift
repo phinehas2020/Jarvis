@@ -560,8 +560,21 @@ final class GeminiLiveClient: NSObject {
     }
 
     private func processAudioInput(buffer: AVAudioPCMBuffer) {
+        // Debug: log first callback
+        if audioChunkCounter == 0 && !isConnected {
+            print("⚠️ Audio callback but not connected")
+        }
+        if audioChunkCounter == 0 && !isReadyForAudio {
+            print("⚠️ Audio callback but not ready for audio")
+        }
+        
         guard isConnected else { return }
         guard isReadyForAudio else { return }
+        
+        // Debug: confirm we passed the guards on first call
+        if audioChunkCounter == 0 {
+            print("🎤 First audio callback - processing...")
+        }
         
         // Pipecat SDK streams ALL audio continuously - server does VAD
         // No client-side turn detection needed
@@ -601,22 +614,26 @@ final class GeminiLiveClient: NSObject {
         }
 
         if let converter = audioConverter,
+           let inputFormat = converterInputFormat,
            let outputFormat = converterOutputFormat {
-            // Match Pipecat SDK's conversion approach
-            let targetBuffer = AVAudioPCMBuffer(
-                pcmFormat: outputFormat,
-                frameCapacity: buffer.frameLength
-            )!
+            // Calculate output frame count based on sample rate ratio
+            let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+            let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1)
             
+            guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrameCapacity) else {
+                print("❌ Failed to create converted buffer")
+                return
+            }
+
             var conversionError: NSError?
-            var inputIndex: AVAudioFramePosition = 0
-            converter.convert(to: targetBuffer, error: &conversionError) { numberOfFrames, inputStatus in
-                if inputIndex >= buffer.frameLength {
-                    inputStatus.pointee = .noDataNow
-                    return AVAudioBuffer()
+            var didProvideInput = false
+            let outputStatus = converter.convert(to: convertedBuffer, error: &conversionError) { _, outStatus in
+                if didProvideInput {
+                    outStatus.pointee = .endOfStream
+                    return nil
                 }
-                inputStatus.pointee = .haveData
-                inputIndex = AVAudioFramePosition(buffer.frameLength)
+                didProvideInput = true
+                outStatus.pointee = .haveData
                 return buffer
             }
 
@@ -625,20 +642,36 @@ final class GeminiLiveClient: NSObject {
                 return
             }
             
-            // Pipecat SDK hack: set frameLength to input frameLength
-            // "UGH this feels like a total hack. But somehow the format converter is assigning a nonsense frameLength"
-            targetBuffer.frameLength = buffer.frameLength
+            if outputStatus == .error {
+                print("❌ Audio conversion returned error status")
+                return
+            }
+            
+            // Set frameLength based on conversion ratio
+            let expectedFrames = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+            convertedBuffer.frameLength = expectedFrames
 
-            guard let int16Channel = targetBuffer.int16ChannelData?[0] else {
+            guard let int16Channel = convertedBuffer.int16ChannelData?[0] else {
                 print("❌ No int16 channel data after conversion")
                 return
             }
             
-            // Extract data exactly like Pipecat SDK
-            let byteCount = Int(targetBuffer.frameLength * targetBuffer.format.streamDescription.pointee.mBytesPerFrame)
+            let byteCount = Int(convertedBuffer.frameLength) * MemoryLayout<Int16>.size
             let pcmData = Data(bytes: int16Channel, count: byteCount)
+            
+            // Debug: log first audio chunk details
+            if audioChunkCounter == 0 {
+                print("🎤 First audio chunk: \(buffer.frameLength) input frames -> \(convertedBuffer.frameLength) output frames")
+                print("🎤 Byte count: \(byteCount), sample rate: \(Int(outputFormat.sampleRate))")
+            }
+            
             sendAudioChunk(pcmData, sampleRate: Int(outputFormat.sampleRate))
             return
+        } else {
+            // Debug: log why conversion path wasn't taken
+            if audioChunkCounter == 0 {
+                print("⚠️ No converter available - converter: \(audioConverter != nil), inputFormat: \(converterInputFormat != nil), outputFormat: \(converterOutputFormat != nil)")
+            }
         }
 
         if audioChunkCounter % 100 == 0 {
