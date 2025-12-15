@@ -178,12 +178,12 @@ final class GeminiLiveClient: NSObject {
         // Model name must be prefixed with "models/"
         let modelName = model.hasPrefix("models/") ? model : "models/\(model)"
 
-        // Setup format for Gemini Live API
-        // CRITICAL: response_modalities must include "AUDIO" to get audio responses!
-        var setupDict: [String: Any] = [
+        // Setup format matching working Pipecat SDK exactly
+        // Note: Pipecat does NOT send systemInstruction in setup - it sends it as separate text messages
+        // Note: Pipecat does NOT send response_modalities - preprod endpoint defaults to audio
+        let setupDict: [String: Any] = [
             "model": modelName,
             "generationConfig": [
-                "response_modalities": ["AUDIO"],
                 "speech_config": [
                     "voice_config": [
                         "prebuilt_voice_config": [
@@ -194,24 +194,41 @@ final class GeminiLiveClient: NSObject {
             ]
         ]
 
-        if !systemPrompt.isEmpty {
-            setupDict["systemInstruction"] = [
-                "parts": [
-                    ["text": systemPrompt]
-                ]
-            ]
-        }
-
         let message: [String: Any] = [
             "setup": setupDict
         ]
 
-        print("📤 Sending Gemini Live setup")
+        print("📤 Sending Gemini Live setup (Pipecat-style)")
         print("📤 Model: \(modelName)")
         if let jsonData = try? JSONSerialization.data(withJSONObject: message, options: .prettyPrinted),
            let jsonString = String(data: jsonData, encoding: .utf8) {
             print("📤 Setup JSON: \(jsonString)")
         }
+        sendJSON(message)
+        
+        // Send system prompt as a separate text message (like Pipecat does)
+        if !systemPrompt.isEmpty {
+            sendSystemPromptAsText()
+        }
+    }
+    
+    private func sendSystemPromptAsText() {
+        // Pipecat sends initial context as TextInput messages after setup
+        let message: [String: Any] = [
+            "clientContent": [
+                "turns": [
+                    [
+                        "role": "user",
+                        "parts": [
+                            ["text": systemPrompt]
+                        ]
+                    ]
+                ],
+                "turnComplete": true
+            ]
+        ]
+        
+        print("📤 Sending system prompt as text message")
         sendJSON(message)
     }
 
