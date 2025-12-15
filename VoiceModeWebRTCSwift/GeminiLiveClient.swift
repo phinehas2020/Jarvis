@@ -35,7 +35,7 @@ final class GeminiLiveClient: NSObject {
     private let playbackStateLock = NSLock()
     private var pendingPlaybackBuffers: Int = 0
 
-    private let desiredInputSampleRate: Double = 24000
+    private let desiredInputSampleRate: Double = 16000
     private var audioConverter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
     private var converterOutputFormat: AVAudioFormat?
@@ -268,7 +268,7 @@ final class GeminiLiveClient: NSObject {
     private func setupAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+            try session.setCategory(.playAndRecord, mode: .videoChat, options: [.defaultToSpeaker, .allowBluetooth])
             try session.setActive(true)
             print("🎤 Audio session initialized at \(session.sampleRate)Hz")
         } catch {
@@ -473,7 +473,7 @@ final class GeminiLiveClient: NSObject {
                 "realtimeInput": [
                     "mediaChunks": [
                         [
-                            "mimeType": "audio/pcm;rate=24000",
+                            "mimeType": "audio/pcm;rate=16000",
                             "data": base64
                         ]
                     ]
