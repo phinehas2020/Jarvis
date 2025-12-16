@@ -82,7 +82,8 @@ class WebRTCManager: NSObject, ObservableObject {
         "edit_note",
         "delete_note",
         "get_all_notes",
-        "run_shortcut"
+        "run_shortcut",
+        "delegate_to_computer_agent"
     ]
     
     // Voice Provider Configuration
@@ -488,6 +489,19 @@ class WebRTCManager: NSObject, ObservableObject {
                      "type": "object",
                      "properties": ["name": ["type": "string"]],
                      "required": ["name"]
+                ]
+            ],
+            [
+                "type": "function",
+                "name": "delegate_to_computer_agent",
+                "description": "Delegate a task to the computer agent (Mac Mini) to be executed on the desktop.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "task": ["type": "string", "description": "Clear instructions for what to do on the computer"],
+                        "max_steps": ["type": "integer", "description": "Maximum steps allowed (default: 20)"]
+                    ],
+                    "required": ["task"]
                 ]
             ]
         ]
@@ -3190,6 +3204,33 @@ class WebRTCManager: NSObject, ObservableObject {
                 }
             }
 
+            return
+
+        case "delegate_to_computer_agent":
+            guard let argData = arguments.data(using: .utf8),
+                  let argDict = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
+                  let task = argDict["task"] as? String else {
+                print("❌ Invalid arguments for delegate_to_computer_agent")
+                return
+            }
+            
+            let maxSteps = argDict["max_steps"] as? Int
+            
+            print("🖥️ Delegating task to computer agent: \(task)")
+            
+            Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self else { return }
+                
+                var toolArgs: [String: Any] = ["task": task]
+                if let maxSteps { toolArgs["maxSteps"] = maxSteps }
+                
+                // Call the MCP tool 'execute_task' exposed by the bridge
+                let resultJSON = await self.performMcpToolCall(name: "execute_task", arguments: toolArgs)
+                
+                await MainActor.run {
+                    self.sendFunctionCallOutput(previousItemId: itemId, callId: callId, output: resultJSON)
+                }
+            }
             return
 
         default:

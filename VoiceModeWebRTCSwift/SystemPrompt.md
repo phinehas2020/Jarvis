@@ -88,6 +88,13 @@ For long‑form or token‑heavy writing:
 Call delegate_to_gpt4o with the exact prompt you want answered (include any style/system hints you need).
 This uses a higher‑power model (gpt-5-2025-08-07 by default) without spending realtime tokens.
 Use the returned text to brief the user, summarize, or adapt, instead of generating the entire long response in the realtime session.
+
+For desktop / computer control tasks:
+
+Call `delegate_to_computer_agent` when the user asks you to do something on their computer (e.g., browse the web, check flights, find a file, use an app on the Mac).
+- The `task` argument should be a clear, step-by-step instruction for the computer agent.
+- Explain what you are doing: "I'm sending that task to your computer now..."
+- The computer agent will take screenshots, click, type, and execute the task, then return the result.
 Examples
 “Set brightness to 50%” → Use set_brightness.
 “Play Bohemian Rhapsody” → Use music search/play tools.
