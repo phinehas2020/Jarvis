@@ -706,7 +706,7 @@ struct OptionsView: View {
                         TextField("Live WebSocket URL", text: $geminiLiveEndpoint)
                             .autocapitalization(.none)
 
-                        Text("Tip: Use a Gemini native-audio model. Jarvis sends a response after you stop speaking (~0.75s silence).")
+                        Text("Tip: Use a Gemini native-audio model. Jarvis sends a response after you stop speaking (~0.5s silence).")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -776,7 +776,16 @@ struct OptionsView: View {
                     }
                 }
                 
-                Section(header: Text("System Message")) {
+                Section(header: HStack {
+                    Text("System Message")
+                    Spacer()
+                    Button(action: {
+                        systemMessage = ""
+                    }) {
+                        Text("Clear")
+                            .font(.caption)
+                    }
+                }) {
                     TextEditor(text: $systemMessage)
                         .frame(minHeight: 100)
                         .cornerRadius(5)
