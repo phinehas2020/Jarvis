@@ -14,6 +14,15 @@ import {
   openUrl,
   wait
 } from './desktop-tools.js';
+import {
+  browser_navigate,
+  browser_click,
+  browser_type,
+  browser_scroll,
+  browser_extract_text,
+  browser_screenshot,
+  browser_close
+} from './browser-tools.js';
 
 const SYSTEM_PROMPT_PATH = new URL('../ComputerAgentPrompt.md', import.meta.url);
 
@@ -49,12 +58,18 @@ function buildAugmentedSystemPrompt(basePrompt) {
     '- open_app: {appName}',
     '- open_url: {url}',
     '- wait: {ms}',
+    '- browser_navigate: {url} (Use for fast, reliable web browsing distinct from desktop vision)',
+    '- browser_click: {selector}',
+    '- browser_type: {selector, text}',
+    '- browser_scroll: {amount}',
+    '- browser_extract_text: {} (Returns visible text from current page)',
     '- done: {status, summary, data?, next_steps?}',
     '',
-    'Do NOT call browser_* tools (Playwright is not available).',
+    'You should prioritize using browser_* tools for purely web-based tasks as they are faster and more reliable than vision-based clicking.',
+    'For OS-level tasks or when the browser tools fail, fall back to desktop vision tools (click, type, etc).',
     '',
     'You must choose exactly ONE action each step and respond with ONLY valid JSON matching this shape:',
-    '{"thought": "...", "action": {"tool": "click|double_click|right_click|drag|scroll|type|keypress|applescript|terminal|open_app|open_url|wait|done", "params": {}}}',
+    '{"thought": "...", "action": {"tool": "click|...|browser_navigate|...|done", "params": {}}}',
     '',
     'When you are finished, use tool "done".'
   ].join('\n');
@@ -84,6 +99,11 @@ const STEP_SCHEMA = {
             'open_app',
             'open_url',
             'wait',
+            'browser_navigate',
+            'browser_click',
+            'browser_type',
+            'browser_scroll',
+            'browser_extract_text',
             'done'
           ]
         },
@@ -221,6 +241,19 @@ async function executeToolAction(action) {
       return openUrl({ url: requireString(params.url, 'url') });
     case 'wait':
       return wait({ ms: requireNumber(params.ms, 'ms') });
+
+    // Browser Tools
+    case 'browser_navigate':
+      return browser_navigate({ url: requireString(params.url, 'url') });
+    case 'browser_click':
+      return browser_click({ selector: requireString(params.selector, 'selector') });
+    case 'browser_type':
+      return browser_type({ selector: requireString(params.selector, 'selector'), text: requireString(params.text, 'text') });
+    case 'browser_scroll':
+      return browser_scroll({ amount: params.amount });
+    case 'browser_extract_text':
+      return browser_extract_text();
+
     default:
       throw new Error(`Unknown tool: ${tool}`);
   }
@@ -252,6 +285,18 @@ function summarizeActionParams(tool, params) {
         return `(${truncate(params.url ?? '', 60)})`;
       case 'wait':
         return `(${params.ms}ms)`;
+
+      // Browser Tools
+      case 'browser_navigate':
+        return `(${truncate(params.url ?? '', 60)})`;
+      case 'browser_click':
+      case 'browser_type':
+        return `(${truncate(params.selector ?? '', 40)})`;
+      case 'browser_scroll':
+        return `(${params.amount ?? 500})`;
+      case 'browser_extract_text':
+        return '';
+
       default:
         return '';
     }
@@ -272,6 +317,9 @@ function summarizeToolResult(result) {
 }
 
 export async function runComputerAgent(options) {
+  // Close browser on completion if needed, but for now we keep it persistent across the session
+  // (It will be closed when the process restarts or if we add explicit cleanup logic)
+
   const {
     task,
     maxSteps = Number(process.env.COMPUTER_AGENT_MAX_STEPS || 20),
@@ -340,6 +388,9 @@ export async function runComputerAgent(options) {
       if (includeFinalScreenshot) {
         finalScreenshot = current.base64;
       }
+
+      // Cleanup browser on completion? Maybe kept alive for multi-turn sessions if needed.
+      // await browser_close();
 
       return {
         status,
