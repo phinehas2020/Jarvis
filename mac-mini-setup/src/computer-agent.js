@@ -308,7 +308,9 @@ export async function runComputerAgent(options) {
       max_completion_tokens: 4096
     });
 
-    const decision = extractJson(completion.choices[0].message.content);
+    const outputText = completion.choices[0].message.content;
+    console.log(`🤖 Model Output (Step ${stepIndex}):`, outputText);
+    const decision = extractJson(outputText);
     const action = decision.action;
 
     if (action?.tool === 'done') {
