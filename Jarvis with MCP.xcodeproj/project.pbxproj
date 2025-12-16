@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		8CDC395F2D29034E008A13BF /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 8CDC395E2D29034E008A13BF /* WebRTC */; };
+		D04BF6622EF1E05A00DF51BC /* swift-gemini-api in Frameworks */ = {isa = PBXBuildFile; productRef = D04BF6612EF1E05A00DF51BC /* swift-gemini-api */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +41,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D04BF6622EF1E05A00DF51BC /* swift-gemini-api in Frameworks */,
 				8CDC395F2D29034E008A13BF /* WebRTC in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -84,6 +86,7 @@
 			name = VoiceModeWebRTCSwift;
 			packageProductDependencies = (
 				8CDC395E2D29034E008A13BF /* WebRTC */,
+				D04BF6612EF1E05A00DF51BC /* swift-gemini-api */,
 			);
 			productName = VoiceModeWebRTCSwift;
 			productReference = 8CDC39492D29030B008A13BF /* VoiceModeWebRTCSwift.app */;
@@ -115,6 +118,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				8CDC395D2D29034E008A13BF /* XCRemoteSwiftPackageReference "WebRTC" */,
+				D04BF6602EF1E05A00DF51BC /* XCRemoteSwiftPackageReference "swift-gemini-api" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8CDC394A2D29030B008A13BF /* Products */;
@@ -293,7 +297,7 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -330,7 +334,7 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -376,6 +380,14 @@
 				minimumVersion = 130.0.0;
 			};
 		};
+		D04BF6602EF1E05A00DF51BC /* XCRemoteSwiftPackageReference "swift-gemini-api" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/phinehas2020/swift-gemini-api";
+			requirement = {
+				kind = revision;
+				revision = a6ece65c35b7b6a5c83a68c406dd6700232597fe;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -383,6 +395,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 8CDC395D2D29034E008A13BF /* XCRemoteSwiftPackageReference "WebRTC" */;
 			productName = WebRTC;
+		};
+		D04BF6612EF1E05A00DF51BC /* swift-gemini-api */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D04BF6602EF1E05A00DF51BC /* XCRemoteSwiftPackageReference "swift-gemini-api" */;
+			productName = "swift-gemini-api";
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

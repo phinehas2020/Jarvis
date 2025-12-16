@@ -1,6 +1,14 @@
 {
-  "originHash" : "7ca243407a3b132834ec3b117a3aea85a8f743151ef868a872c8bbf8082921f6",
+  "originHash" : "d2ec9e64568cab34e78370cb677efcd24fe0f28448c9ff9ad5b66a9ca7561b56",
   "pins" : [
+    {
+      "identity" : "swift-gemini-api",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/phinehas2020/swift-gemini-api",
+      "state" : {
+        "revision" : "a6ece65c35b7b6a5c83a68c406dd6700232597fe"
+      }
+    },
     {
       "identity" : "webrtc",
       "kind" : "remoteSourceControl",

@@ -98,7 +98,7 @@ class WebRTCManager: NSObject, ObservableObject {
     // Error Handling
     @Published var errorMessage: String? = nil
 
-    private var geminiClient: GeminiLiveClient?
+    private var geminiClient: GeminiLiveClientAdapter?
 
     // Private tool definitions helper
     func getLocalTools() -> [[String: Any]] {
@@ -3308,7 +3308,7 @@ class WebRTCManager: NSObject, ObservableObject {
             allTools.append(contentsOf: getLocalTools())
             allTools.append(contentsOf: mcpTools)
 
-            let client = GeminiLiveClient(apiKey: resolvedApiKey, model: resolvedModel, systemPrompt: systemMessage, tools: allTools)
+            let client = GeminiLiveClientAdapter(apiKey: resolvedApiKey, model: resolvedModel, systemPrompt: systemMessage, tools: allTools)
             client.delegate = self
             geminiClient = client
 
@@ -4071,22 +4071,22 @@ extension WebRTCManager: RTCPeerConnectionDelegate {
     }
 }
 
-// MARK: - GeminiLiveClientDelegate
-extension WebRTCManager: GeminiLiveClientDelegate {
-    func geminiLiveClient(_ client: GeminiLiveClient, didChangeStatus status: ConnectionStatus) {
+// MARK: - GeminiLiveClientAdapterDelegate
+extension WebRTCManager: GeminiLiveClientAdapterDelegate {
+    func geminiLiveClientAdapter(_ client: GeminiLiveClientAdapter, didChangeStatus status: ConnectionStatus) {
         DispatchQueue.main.async {
             self.connectionStatus = status
         }
     }
 
-    func geminiLiveClient(_ client: GeminiLiveClient, didReceiveMessage message: ConversationItem) {
+    func geminiLiveClientAdapter(_ client: GeminiLiveClientAdapter, didReceiveMessage message: ConversationItem) {
         DispatchQueue.main.async {
             self.conversation.append(message)
             self.conversationMap[message.id] = message
         }
     }
 
-    func geminiLiveClient(_ client: GeminiLiveClient, didEncounterError error: Error) {
+    func geminiLiveClientAdapter(_ client: GeminiLiveClientAdapter, didEncounterError error: Error) {
         print("❌ Gemini Live Error: \(error.localizedDescription)")
         DispatchQueue.main.async {
             self.errorMessage = error.localizedDescription
@@ -4100,7 +4100,7 @@ extension WebRTCManager: GeminiLiveClientDelegate {
         }
     }
 
-    func geminiLiveClient(_ client: GeminiLiveClient, didRequestToolExecution tool: String, args: [String: Any], callId: String) {
+    func geminiLiveClientAdapter(_ client: GeminiLiveClientAdapter, didRequestToolExecution tool: String, args: [String: Any], callId: String) {
         print("🔧 Gemini requested tool: \(tool) callId: \(callId)")
 
         // Convert args to JSON string to reuse handleLocalFunctionCall logic
