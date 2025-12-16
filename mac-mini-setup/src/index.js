@@ -62,8 +62,8 @@ async function bbFetch(path, options = {}) {
 
 const TOOLS = [
   {
-    name: 'bluebubbles_health',
-    description: 'Check if BlueBubbles server is running and accessible',
+    name: 'get_status',
+    description: 'Check if BlueBubbles server is running and accessible (health check)',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -72,41 +72,41 @@ const TOOLS = [
   },
   {
     name: 'bluebubbles_list_chats',
-    description: 'List or search chat conversations. Use this to find existing chats before sending messages.',
+    description: 'List or search chat conversations. Use this to find existing chats.',
     inputSchema: {
       type: 'object',
       properties: {
-        limit: { type: 'number', description: 'Max results (1-500)', default: 25 },
+        limit: { type: 'number', description: 'Max results', default: 25 },
         offset: { type: 'number', description: 'Pagination offset', default: 0 },
-        search: { type: 'string', description: 'Search term (phone number, name, etc.)' },
-        includeParticipants: { type: 'boolean', description: 'Include participant details', default: true }
+        search: { type: 'string', description: 'Search term (phone, name)' },
+        includeParticipants: { type: 'boolean', default: true }
       },
       required: []
     }
   },
   {
-    name: 'bluebubbles_get_messages',
-    description: 'Get messages from a specific chat. Requires chatGuid.',
+    name: 'fetch_messages',
+    description: 'Get messages from a chat. Requires chatGuid.',
     inputSchema: {
       type: 'object',
       properties: {
-        chatGuid: { type: 'string', description: 'Chat GUID (e.g., iMessage;-;+12345678900)' },
-        limit: { type: 'number', description: 'Max messages to fetch (1-500)', default: 50 },
-        offset: { type: 'number', description: 'Pagination offset', default: 0 },
-        after: { type: 'string', description: 'Fetch messages after this date/guid' },
-        before: { type: 'string', description: 'Fetch messages before this date/guid' }
+        chatGuid: { type: 'string', description: 'Chat GUID' },
+        limit: { type: 'number', default: 50 },
+        offset: { type: 'number', default: 0 },
+        after: { type: 'string' },
+        before: { type: 'string' }
       },
       required: ['chatGuid']
     }
   },
   {
-    name: 'bluebubbles_send_message',
-    description: 'Send a message to an existing chat. Requires chatGuid - use bluebubbles_list_chats first to find it, or bluebubbles_create_chat to create a new one.',
+    name: 'send_imessage',
+    description: 'Send a message to a chat.',
     inputSchema: {
       type: 'object',
       properties: {
-        chatGuid: { type: 'string', description: 'Chat GUID (required)' },
-        message: { type: 'string', description: 'Message text to send' },
+        chatGuid: { type: 'string', description: 'Chat GUID' },
+        message: { type: 'string', description: 'Message text' },
         service: { type: 'string', enum: ['iMessage', 'SMS'], default: 'iMessage' }
       },
       required: ['chatGuid', 'message']
@@ -114,16 +114,12 @@ const TOOLS = [
   },
   {
     name: 'bluebubbles_create_chat',
-    description: 'Create a new chat and optionally send the first message. On macOS Big Sur+, a message is required when creating a chat.',
+    description: 'Create a new chat.',
     inputSchema: {
       type: 'object',
       properties: {
-        addresses: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Phone numbers or Apple IDs (e.g., ["+12345678900"])'
-        },
-        message: { type: 'string', description: 'Initial message to send (required on Big Sur+)' },
+        addresses: { type: 'array', items: { type: 'string' } },
+        message: { type: 'string' },
         service: { type: 'string', enum: ['iMessage', 'SMS'], default: 'iMessage' }
       },
       required: ['addresses']
@@ -131,24 +127,24 @@ const TOOLS = [
   },
   {
     name: 'bluebubbles_request',
-    description: 'Make a raw API request to BlueBubbles. Use this for advanced operations not covered by other tools.',
+    description: 'Raw API request.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'API path (e.g., /api/v1/chat/new)' },
-        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE'], default: 'GET' },
-        body: { type: 'object', description: 'Request body for POST/PUT requests' }
+        path: { type: 'string' },
+        method: { type: 'string' },
+        body: { type: 'object' }
       },
       required: ['path']
     }
   },
   {
     name: 'bluebubbles_get_attachment',
-    description: 'Get attachment metadata by GUID',
+    description: 'Get attachment metadata.',
     inputSchema: {
       type: 'object',
       properties: {
-        attachmentGuid: { type: 'string', description: 'Attachment GUID' }
+        attachmentGuid: { type: 'string' }
       },
       required: ['attachmentGuid']
     }
@@ -182,6 +178,7 @@ async function handleTool(name, args) {
 
   try {
     switch (name) {
+      case 'get_status':
       case 'bluebubbles_health': {
         const result = await bbFetch('/api/v1/server/info');
         return { success: true, ...result };
@@ -190,7 +187,6 @@ async function handleTool(name, args) {
       case 'bluebubbles_list_chats': {
         const params = new URLSearchParams();
         params.set('limit', args.limit || 25);
-        params.set('offset', args.offset || 0);
         if (args.search) params.set('with', args.search);
 
         const result = await bbFetch(`/api/v1/chat/query?${params.toString()}`, {
@@ -204,6 +200,7 @@ async function handleTool(name, args) {
         return result;
       }
 
+      case 'fetch_messages':
       case 'bluebubbles_get_messages': {
         const result = await bbFetch(`/api/v1/chat/${encodeURIComponent(args.chatGuid)}/message`, {
           method: 'POST',
@@ -218,6 +215,7 @@ async function handleTool(name, args) {
         return result;
       }
 
+      case 'send_imessage':
       case 'bluebubbles_send_message': {
         const result = await bbFetch('/api/v1/message/text', {
           method: 'POST',
