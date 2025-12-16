@@ -217,11 +217,29 @@ async function handleTool(name, args) {
 
       case 'send_imessage':
       case 'bluebubbles_send_message': {
+        const messageText = args.message || args.text;
+
+        // If 'to' is provided instead of 'chatGuid', assume we need to create/find a chat
+        if (args.to && !args.chatGuid) {
+          console.log(`✨ Auto-creating chat for recipient: ${args.to}`);
+          const result = await bbFetch('/api/v1/chat/new', {
+            method: 'POST',
+            body: JSON.stringify({
+              addresses: [args.to],
+              message: messageText,
+              service: args.service || 'iMessage',
+              method: args.service === 'SMS' ? 'private-api' : 'apple-script'
+            })
+          });
+          return result;
+        }
+
+        // Otherwise use the standard send endpoint
         const result = await bbFetch('/api/v1/message/text', {
           method: 'POST',
           body: JSON.stringify({
             chatGuid: args.chatGuid,
-            message: args.message,
+            message: messageText,
             method: args.service === 'SMS' ? 'private-api' : 'apple-script'
           })
         });
