@@ -8,3 +8,12 @@ MCP_PORT=3000
 # Generate a secure token with: openssl rand -hex 32
 MCP_BEARER_TOKEN=your_secure_random_token_here
 
+# Optional: Computer agent (execute_task)
+# Required if you want to run the desktop automation agent from MCP.
+OPENAI_API_KEY=your_openai_api_key_here
+# COMPUTER_AGENT_MODEL=gpt-5.2
+# COMPUTER_AGENT_MAX_STEPS=20
+# COMPUTER_AGENT_IMAGE_DETAIL=high
+# COMPUTER_AGENT_POST_ACTION_WAIT_MS=300
+# If cliclick isn't on PATH, set an absolute path (e.g., /opt/homebrew/bin/cliclick)
+# CLICLICK_PATH=
