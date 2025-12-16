@@ -126,7 +126,23 @@ function extractJson(text) {
     trimmed = trimmed.substring(firstBrace, lastBrace + 1);
   }
 
-  return JSON.parse(trimmed);
+  try {
+    return JSON.parse(trimmed);
+  } catch (error) {
+    // Handle case where model outputs multiple JSON objects: {"thought":...} {"action":...}
+    // We try to wrap them in an array or merge them.
+    // Simple heuristic: if it looks like there are multiple root objects, try formatting as array
+    try {
+      // Replace "}{" with "},{" to make valid array, wrap in []
+      const arrayText = `[${trimmed.replace(/}\s*{/g, '},{')}]`;
+      const array = JSON.parse(arrayText);
+      // Merge all objects in the array
+      return array.reduce((acc, curr) => ({ ...acc, ...curr }), {});
+    } catch (e2) {
+      console.error('❌ Failed to parse JSON:', trimmed);
+      throw error; // Throw original error
+    }
+  }
 }
 
 async function createOpenAIClient() {
