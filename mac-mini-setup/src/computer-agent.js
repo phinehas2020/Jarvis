@@ -111,8 +111,21 @@ function requireNumber(value, label) {
 }
 
 function extractJson(text) {
-  const trimmed = String(text ?? '').trim();
+  let trimmed = String(text ?? '').trim();
   if (!trimmed) throw new Error('Model returned empty output');
+
+  // Strip markdown code fences if present
+  if (trimmed.startsWith('```')) {
+    trimmed = trimmed.replace(/^```(json)?\n?/, '').replace(/\n?```$/, '');
+  }
+
+  // Find first { and last } to handle potentially conversational wrapping
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1) {
+    trimmed = trimmed.substring(firstBrace, lastBrace + 1);
+  }
+
   return JSON.parse(trimmed);
 }
 
