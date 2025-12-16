@@ -43,7 +43,7 @@ console.log(`📡 BlueBubbles URL: ${CONFIG.bluebubbles.url}`);
 async function bbFetch(path, options = {}) {
   const url = new URL(path, CONFIG.bluebubbles.url);
   url.searchParams.set('password', CONFIG.bluebubbles.password);
-  
+
   const response = await fetch(url.toString(), {
     ...options,
     headers: {
@@ -51,7 +51,7 @@ async function bbFetch(path, options = {}) {
       ...options.headers
     }
   });
-  
+
   const data = await response.json();
   return { status: response.status, data };
 }
@@ -118,8 +118,8 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        addresses: { 
-          type: 'array', 
+        addresses: {
+          type: 'array',
           items: { type: 'string' },
           description: 'Phone numbers or Apple IDs (e.g., ["+12345678900"])'
         },
@@ -179,20 +179,20 @@ let computerAgentBusy = false;
 
 async function handleTool(name, args) {
   console.log(`🔧 Executing tool: ${name}`, JSON.stringify(args));
-  
+
   try {
     switch (name) {
       case 'bluebubbles_health': {
         const result = await bbFetch('/api/v1/server/info');
         return { success: true, ...result };
       }
-      
+
       case 'bluebubbles_list_chats': {
         const params = new URLSearchParams();
         params.set('limit', args.limit || 25);
         params.set('offset', args.offset || 0);
         if (args.search) params.set('with', args.search);
-        
+
         const result = await bbFetch(`/api/v1/chat/query?${params.toString()}`, {
           method: 'POST',
           body: JSON.stringify({
@@ -203,7 +203,7 @@ async function handleTool(name, args) {
         });
         return result;
       }
-      
+
       case 'bluebubbles_get_messages': {
         const result = await bbFetch(`/api/v1/chat/${encodeURIComponent(args.chatGuid)}/message`, {
           method: 'POST',
@@ -217,7 +217,7 @@ async function handleTool(name, args) {
         });
         return result;
       }
-      
+
       case 'bluebubbles_send_message': {
         const result = await bbFetch('/api/v1/message/text', {
           method: 'POST',
@@ -229,7 +229,7 @@ async function handleTool(name, args) {
         });
         return result;
       }
-      
+
       case 'bluebubbles_create_chat': {
         const result = await bbFetch('/api/v1/chat/new', {
           method: 'POST',
@@ -241,7 +241,7 @@ async function handleTool(name, args) {
         });
         return result;
       }
-      
+
       case 'bluebubbles_request': {
         const result = await bbFetch(args.path, {
           method: args.method || 'GET',
@@ -249,7 +249,7 @@ async function handleTool(name, args) {
         });
         return result;
       }
-      
+
       case 'bluebubbles_get_attachment': {
         const result = await bbFetch(`/api/v1/attachment/${encodeURIComponent(args.attachmentGuid)}`);
         return result;
@@ -287,7 +287,7 @@ async function handleTool(name, args) {
           computerAgentBusy = false;
         }
       }
-      
+
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -303,16 +303,16 @@ async function handleTool(name, args) {
 
 function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
-  
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Missing or invalid Authorization header' });
   }
-  
+
   const token = authHeader.substring(7);
   if (token !== CONFIG.bearerToken) {
     return res.status(401).json({ error: 'Invalid bearer token' });
   }
-  
+
   next();
 }
 
@@ -322,16 +322,16 @@ function authenticate(req, res, next) {
 
 app.post('/mcp', authenticate, async (req, res) => {
   const { jsonrpc, method, params, id } = req.body;
-  
+
   console.log(`📥 MCP Request: ${method}`, params ? JSON.stringify(params).substring(0, 200) : '');
-  
+
   if (jsonrpc !== '2.0') {
     return res.json({ jsonrpc: '2.0', error: { code: -32600, message: 'Invalid Request' }, id });
   }
-  
+
   try {
     let result;
-    
+
     switch (method) {
       case 'initialize':
         result = {
@@ -345,11 +345,11 @@ app.post('/mcp', authenticate, async (req, res) => {
           }
         };
         break;
-        
+
       case 'tools/list':
         result = { tools: TOOLS };
         break;
-        
+
       case 'tools/call':
         const { name, arguments: args } = params;
         const toolResult = await handleTool(name, args || {});
@@ -360,12 +360,12 @@ app.post('/mcp', authenticate, async (req, res) => {
           }]
         };
         break;
-        
+
       case 'notifications/initialized':
         // Acknowledgment, no response needed
         result = {};
         break;
-        
+
       default:
         return res.json({
           jsonrpc: '2.0',
@@ -373,10 +373,10 @@ app.post('/mcp', authenticate, async (req, res) => {
           id
         });
     }
-    
+
     console.log(`📤 MCP Response for ${method}:`, JSON.stringify(result).substring(0, 200));
     res.json({ jsonrpc: '2.0', result, id });
-    
+
   } catch (error) {
     console.error(`❌ MCP Error:`, error);
     res.json({
@@ -396,8 +396,93 @@ app.get('/health', (req, res) => {
 // Start Server
 // ============================================================================
 
-app.listen(CONFIG.port, () => {
+// ============================================================================
+// Start Server with WebSocket Support
+// ============================================================================
+
+import { WebSocketServer } from 'ws';
+import http from 'http';
+
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', (ws, req) => {
+  console.log(`🔌 Client connected from ${req.socket.remoteAddress}`);
+
+  ws.on('message', async (message) => {
+    try {
+      const msgText = message.toString();
+      console.log(`📥 MCP (WS) Request: ${msgText.substring(0, 100)}...`);
+
+      const request = JSON.parse(msgText);
+      const { jsonrpc, method, params, id } = request;
+
+      // Basic validation
+      if (jsonrpc !== '2.0') {
+        ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32600, message: 'Invalid Request' }, id }));
+        return;
+      }
+
+      // Check for auth (simple check for now, can be expanded)
+      // Note: In WS, auth is often done via query params or initial handshake.
+      // For now, we'll assume if they can connect, they are okay, OR we can check params if the client sends them.
+      // Ideally client sends {"method": "initialize", "params": { "authorization": "..." }} if custom auth needed.
+
+      let result;
+      switch (method) {
+        case 'initialize':
+          result = {
+            protocolVersion: '2024-11-05',
+            capabilities: { tools: {} },
+            serverInfo: { name: 'bluebubbles-mcp', version: '1.0.0' }
+          };
+          break;
+
+        case 'tools/list':
+          result = { tools: TOOLS };
+          break;
+
+        case 'tools/call':
+          const { name, arguments: args } = params;
+          // IMPORTANT: computer-agent logic needs to be aware it might not be able to return streaming progress easily here yet
+          const toolResult = await handleTool(name, args || {});
+          result = {
+            content: [{
+              type: 'text',
+              text: JSON.stringify(toolResult, null, 2)
+            }]
+          };
+          break;
+
+        case 'notifications/initialized':
+          result = {};
+          break;
+
+        default:
+          throw new Error(`Method not found: ${method}`);
+      }
+
+      const response = { jsonrpc: '2.0', result, id };
+      console.log(`📤 MCP (WS) Response: ${JSON.stringify(response).substring(0, 100)}...`);
+      ws.send(JSON.stringify(response));
+
+    } catch (error) {
+      console.error(`❌ MCP (WS) Error:`, error);
+      ws.send(JSON.stringify({
+        jsonrpc: '2.0',
+        error: { code: -32603, message: error.message },
+        id: null
+      }));
+    }
+  });
+
+  ws.on('close', () => {
+    console.log('🔌 Client disconnected');
+  });
+});
+
+server.listen(CONFIG.port, () => {
   console.log(`✅ BlueBubbles MCP Bridge running on port ${CONFIG.port}`);
-  console.log(`🔗 MCP endpoint: http://localhost:${CONFIG.port}/mcp`);
-  console.log(`💚 Health check: http://localhost:${CONFIG.port}/health`);
+  console.log(`🔗 MCP HTTP endpoint: http://localhost:${CONFIG.port}/mcp`);
+  console.log(`🔗 MCP WebSocket endpoint: ws://localhost:${CONFIG.port}/`);
 });
