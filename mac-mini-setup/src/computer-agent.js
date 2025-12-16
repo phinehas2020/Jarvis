@@ -130,8 +130,8 @@ function buildUserInput({ task, stepIndex, maxSteps, lastToolResult, history }) 
   const recent = history.slice(-8);
   const historyText = recent.length
     ? recent
-        .map((h) => `- Step ${h.step}: ${h.tool} ${h.paramsSummary} -> ${h.resultSummary}`)
-        .join('\n')
+      .map((h) => `- Step ${h.step}: ${h.tool} ${h.paramsSummary} -> ${h.resultSummary}`)
+      .join('\n')
     : '(none yet)';
 
   const lastText = lastToolResult
@@ -273,30 +273,29 @@ export async function runComputerAgent(options) {
       history
     });
 
-    const response = await client.responses.create({
+    const completion = await client.chat.completions.create({
       model,
-      input: [
+      messages: [
         {
           role: 'system',
-          content: [{ type: 'input_text', text: systemPrompt }]
+          content: systemPrompt
         },
         {
           role: 'user',
           content: [
-            { type: 'input_text', text: inputText },
-            { type: 'input_image', image_url: currentImageUrl, detail: imageDetail }
+            { type: 'text', text: inputText },
+            { type: 'image_url', image_url: { url: currentImageUrl, detail: imageDetail } }
           ]
         }
       ],
-      text: {
-        format: {
-          type: 'json_schema',
-          json_schema: { name: 'computer_agent_step', schema: STEP_SCHEMA, strict: true }
-        }
-      }
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'computer_agent_step', schema: STEP_SCHEMA, strict: true }
+      },
+      max_completion_tokens: 4096
     });
 
-    const decision = extractJson(response.output_text);
+    const decision = extractJson(completion.choices[0].message.content);
     const action = decision.action;
 
     if (action?.tool === 'done') {
@@ -337,7 +336,7 @@ export async function runComputerAgent(options) {
     });
 
     if (postActionWaitMs > 0) {
-      await wait({ ms: postActionWaitMs }).catch(() => {});
+      await wait({ ms: postActionWaitMs }).catch(() => { });
     }
 
     current = await screenshot({ includeCursor: true });
