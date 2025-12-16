@@ -155,13 +155,13 @@ const TOOLS = [
   },
   {
     name: 'execute_task',
-    description: 'Run a GPT-5.2 vision-driven computer agent on this Mac (screenshot → decide → act → repeat) using desktop controls.',
+    description: 'Run a GPT-5 vision-driven computer agent on this Mac (screenshot → decide → act → repeat) using desktop controls.',
     inputSchema: {
       type: 'object',
       properties: {
         task: { type: 'string', description: 'Task instructions for the computer agent' },
         maxSteps: { type: 'number', description: 'Maximum action steps (default: 20)', default: 20 },
-        model: { type: 'string', description: 'Override model (default: COMPUTER_AGENT_MODEL or gpt-5.2)' },
+        model: { type: 'string', description: 'Override model (default: COMPUTER_AGENT_MODEL or gpt-5-2025-08-07)' },
         imageDetail: { type: 'string', enum: ['low', 'high', 'auto'], description: 'Vision detail level', default: 'high' },
         postActionWaitMs: { type: 'number', description: 'Delay after each action before next screenshot', default: 300 },
         includeFinalScreenshot: { type: 'boolean', description: 'Include final screenshot base64 in the response', default: true }
