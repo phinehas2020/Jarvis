@@ -290,7 +290,7 @@ export async function runComputerAgent(options) {
       ],
       response_format: {
         type: 'json_schema',
-        json_schema: { name: 'computer_agent_step', schema: STEP_SCHEMA, strict: true }
+        json_schema: { name: 'computer_agent_step', schema: STEP_SCHEMA, strict: false }
       },
       max_completion_tokens: 4096
     });
