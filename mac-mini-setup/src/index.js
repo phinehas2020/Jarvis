@@ -164,6 +164,61 @@ const TOOLS = [
       },
       required: ['task']
     }
+  },
+  // Browser Tools (Direct Access)
+  {
+    name: 'browser_navigate',
+    description: 'Navigate the Playwright browser to a URL.',
+    inputSchema: {
+      type: 'object',
+      properties: { url: { type: 'string' } },
+      required: ['url']
+    }
+  },
+  {
+    name: 'browser_click',
+    description: 'Click an element in the browser.',
+    inputSchema: {
+      type: 'object',
+      properties: { selector: { type: 'string' } },
+      required: ['selector']
+    }
+  },
+  {
+    name: 'browser_type',
+    description: 'Type text into an element in the browser.',
+    inputSchema: {
+      type: 'object',
+      properties: { selector: { type: 'string' }, text: { type: 'string' } },
+      required: ['selector', 'text']
+    }
+  },
+  {
+    name: 'browser_scroll',
+    description: 'Scroll the browser page.',
+    inputSchema: {
+      type: 'object',
+      properties: { amount: { type: 'number' } },
+      required: []
+    }
+  },
+  {
+    name: 'browser_extract_text',
+    description: 'Extract visible text from the current page.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: 'browser_screenshot',
+    description: 'Take a screenshot of the current browser page.',
+    inputSchema: {
+      type: 'object',
+      properties: { fullPage: { type: 'boolean' } },
+      required: []
+    }
   }
 ];
 
@@ -273,26 +328,17 @@ async function handleTool(name, args) {
 
       case 'execute_task': {
         if (computerAgentBusy) {
-          return { error: 'Computer agent is already running (execute_task busy)' };
+          return { error: 'Computer agent is already running a task. Please wait.' };
         }
-        if (!args?.task || typeof args.task !== 'string') {
-          return { error: 'task (string) is required' };
-        }
-
         computerAgentBusy = true;
         try {
+          // Dynamic import allows updates to computer-agent.js without restarting server (if we were clearing cache, but we aren't)
+          // But mainly it keeps load time fast.
           const { runComputerAgent } = await import('./computer-agent.js');
-          return await runComputerAgent({
-            task: args.task,
-            maxSteps: args.maxSteps,
-            model: args.model,
-            imageDetail: args.imageDetail,
-            postActionWaitMs: args.postActionWaitMs,
-            includeFinalScreenshot: args.includeFinalScreenshot
-          });
+          return await runComputerAgent(args);
         } catch (error) {
           const message = String(error?.message || error);
-          if (message.includes("Cannot find package 'openai'")) {
+          if (error.code === 'MODULE_NOT_FOUND') {
             return { error: "Missing dependency: openai. Install with: npm install openai" };
           }
           if (message.includes('OPENAI_API_KEY is required')) {
@@ -303,6 +349,20 @@ async function handleTool(name, args) {
           computerAgentBusy = false;
         }
       }
+
+      // Browser Tools Handlers
+      case 'browser_navigate':
+        return await browser_navigate(args);
+      case 'browser_click':
+        return await browser_click(args);
+      case 'browser_type':
+        return await browser_type(args);
+      case 'browser_scroll':
+        return await browser_scroll(args);
+      case 'browser_extract_text':
+        return await browser_extract_text(args);
+      case 'browser_screenshot':
+        return await browser_screenshot(args);
 
       default:
         return { error: `Unknown tool: ${name}` };
