@@ -13,7 +13,7 @@ async function ensurePage() {
     if (!browser) {
         console.log('🌐 Launching Playwright browser...');
         browser = await chromium.launch({
-            headless: false, // Show the browser so user can see it
+            headless: true, // Run headless as requested per user
             args: ['--no-sandbox']
         });
         context = await browser.newContext({
