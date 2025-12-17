@@ -166,13 +166,21 @@ function extractJson(text) {
 }
 
 async function createOpenAIClient() {
-  const apiKey = process.env.OPENAI_API_KEY;
+  let apiKey = process.env.OPENAI_API_KEY;
+  let baseURL = undefined;
+
+  // xAI Support
+  if (process.env.XAI_API_KEY) {
+    apiKey = process.env.XAI_API_KEY;
+    baseURL = 'https://api.x.ai/v1';
+  }
+
   if (!apiKey) {
-    throw new Error('OPENAI_API_KEY is required to use execute_task');
+    throw new Error('OPENAI_API_KEY or XAI_API_KEY is required to use execute_task');
   }
 
   const { default: OpenAI } = await import('openai');
-  return new OpenAI({ apiKey });
+  return new OpenAI({ apiKey, baseURL });
 }
 
 function buildUserInput({ task, stepIndex, maxSteps, lastToolResult, history }) {
