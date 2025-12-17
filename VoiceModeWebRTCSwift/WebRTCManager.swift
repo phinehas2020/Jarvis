@@ -24,6 +24,9 @@ class WebRTCManager: NSObject, ObservableObject {
     @Published var isCameraOn: Bool = false
     @Published var isUsingFrontCamera: Bool = true
     
+    // Audio visualization
+    @Published var waveformGenerator = WaveformGenerator()
+    
     // Basic conversation text
     @Published var conversation: [ConversationItem] = []
     @Published var outgoingMessage: String = ""

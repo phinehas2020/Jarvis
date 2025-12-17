@@ -396,8 +396,20 @@ struct ContentView: View {
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         case .disconnected:
                             webrtcManager.eventTypeStr = ""
+                            webrtcManager.waveformGenerator.reset()
                         }
                     }
+                
+                // Audio Waveform Visualization (shown when connected)
+                if webrtcManager.connectionStatus == .connected {
+                    WaveformView(
+                        amplitudes: webrtcManager.waveformGenerator.amplitudes,
+                        isActive: !webrtcManager.isMicMuted,
+                        accentColor: webrtcManager.isMicMuted ? .red : .blue
+                    )
+                    .frame(width: 80, height: 24)
+                    .transition(.scale.combined(with: .opacity))
+                }
                 
                 Spacer()
                 
