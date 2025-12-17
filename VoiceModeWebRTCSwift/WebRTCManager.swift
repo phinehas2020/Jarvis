@@ -2101,6 +2101,11 @@ class WebRTCManager: NSObject, ObservableObject {
             return
         }
 
+        if currentProvider == .xai {
+            xaiClient?.sendToolResult(callId: callId, result: output)
+            return
+        }
+
         guard let dc = dataChannel, dc.readyState == .open else {
             print("❌ Data channel not ready to send function call output")
             return
@@ -2328,10 +2333,6 @@ class WebRTCManager: NSObject, ObservableObject {
     
     /// Handle local function calls from the AI
     private func handleLocalFunctionCall(itemId: String, callId: String, name: String, arguments: String) {
-        guard let dc = dataChannel, dc.readyState == .open else {
-            print("❌ Data channel not ready for function call response")
-            return
-        }
         
         var functionResult: [String: Any] = [:]
         
@@ -3462,25 +3463,24 @@ class WebRTCManager: NSObject, ObservableObject {
                 guard let self = self else { return }
                 print("🔧 XAI: Executing tool '\(name)' with callId: \(callId)")
                 
-                // Execute the tool (same logic as OpenAI)
-                Task { [weak self] in
-                    guard let self = self else { return }
-                    
-                    // Check if it's an MCP tool
-                    if self.mcpTools.contains(where: { ($0["name"] as? String) == name }) {
-                        // Parse arguments
-                        var args: [String: Any] = [:]
+                // 1. Check if it's an MCP tool
+                if self.mcpExpectedToolNames.contains(name) || self.mcpTools.contains(where: { ($0["server_label"] as? String) == name }) {
+                    Task { [weak self] in
+                        guard let self = self else { return }
+                        
+                        var argDict: [String: Any] = [:]
                         if let data = arguments.data(using: .utf8),
                            let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                            args = parsed
+                            argDict = parsed
                         }
                         
-                        let result = await self.performMcpToolCall(name: name, arguments: args)
+                        let result = await self.performMcpToolCall(name: name, arguments: argDict)
                         self.xaiClient?.sendToolResult(callId: callId, result: result)
-                    } else {
-                        // Handle local tool - reuse existing logic
-                        self.handleXAILocalToolCall(name: name, callId: callId, arguments: arguments)
                     }
+                } else {
+                    // 2. Handle as a local tool (unified logic)
+                    // itemId isn't strictly used for xAI but we pass callId as a surrogate if needed
+                    self.handleLocalFunctionCall(itemId: callId, callId: callId, name: name, arguments: arguments)
                 }
             }
 
@@ -4331,75 +4331,6 @@ extension WebRTCManager: GeminiLiveClientAdapterDelegate {
     // MARK: - XAI Tool Handling
     
     /// Handle local tool calls from XAI client
-    private func handleXAILocalToolCall(name: String, callId: String, arguments: String) {
-        // Parse arguments
-        var argDict: [String: Any] = [:]
-        if let data = arguments.data(using: .utf8),
-           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            argDict = parsed
-        }
-        
-        // Execute tool based on name and send result back
-        Task { [weak self] in
-            guard let self = self else { return }
-            var result: [String: Any] = ["error": "Unknown tool"]
-            
-            switch name {
-            case "search_contacts":
-                let query = argDict["query"] as? String ?? ""
-                let limit = argDict["limit"] as? Int ?? 10
-                let contacts = self.searchContacts(query: query, limit: limit)
-                result = ["contacts": contacts, "count": contacts.count]
-                
-            case "set_brightness":
-                let level = argDict["level"] as? Double ?? 0.5
-                result = self.setBrightness(Float(level))
-                
-            case "get_brightness":
-                result = self.getBrightness()
-                
-            case "set_volume":
-                let level = argDict["level"] as? Double ?? 0.5
-                result = self.setVolume(Float(level))
-                
-            case "get_volume":
-                result = self.getVolume()
-                
-            case "create_reminder":
-                let title = argDict["title"] as? String ?? ""
-                let dueDateStr = argDict["due_date"] as? String
-                var dueDate: Date? = nil
-                
-                if let dateStr = dueDateStr {
-                     let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
-                     let matches = detector?.matches(in: dateStr, options: [], range: NSRange(location: 0, length: dateStr.utf16.count))
-                     dueDate = matches?.first?.date
-                }
-                
-                result = self.createReminder(title: title, dueDate: dueDate)
-                
-            case "create_note":
-                let title = argDict["title"] as? String ?? ""
-                let content = argDict["content"] as? String ?? ""
-                result = self.createNote(title: title, content: content)
-                
-            case "send_imessage", "fetch_messages", "get_status":
-                // These are MCP tools, should be handled via MCP
-                let mcpResult = await self.performMcpToolCall(name: name, arguments: argDict)
-                self.xaiClient?.sendToolResult(callId: callId, result: mcpResult)
-                return
-                
-            default:
-                print("⚠️ Unknown XAI local tool: \(name)")
-                result = ["error": "Unknown tool: \(name)"]
-            }
-            
-            // Send result back to XAI
-            if let resultJSON = self.jsonString(from: result) {
-                self.xaiClient?.sendToolResult(callId: callId, result: resultJSON)
-            }
-        }
-    }
 }
 
 // MARK: - RTCDataChannelDelegate

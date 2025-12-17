@@ -449,12 +449,10 @@ class XAILiveClient: NSObject {
             if let item = event["item"] as? [String: Any],
                let itemType = item["type"] as? String,
                itemType == "function_call",
-               let callId = item["call_id"] as? String,
                let name = item["name"] as? String {
-                // Get arguments - might be in different places
-                let arguments = item["arguments"] as? String ?? "{}"
-                print("🔧 XAI: Function call complete: \(name)")
-                self.onToolCall?(name, callId, arguments)
+                print("🔧 XAI: Function call item completed: \(name)")
+                // Note: We don't trigger onToolCall here because it's already triggered 
+                // in response.function_call_arguments.done which has the full arguments.
             }
             
         case "error":
