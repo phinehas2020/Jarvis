@@ -481,11 +481,34 @@ async function processMcpRequest(request) {
 
       case 'tools/call':
         const { name, arguments: args } = params;
-        const toolResult = await handleTool(name, args || {});
+        let toolResult = await handleTool(name, args || {});
+
+        // Special handling for bulky results (like execute_task)
+        let responseText = '';
+        if (toolResult && typeof toolResult === 'object') {
+          if (toolResult.summary && toolResult.status) {
+            // Priority summary for the model to see
+            responseText = `Status: ${toolResult.status}\nSummary: ${toolResult.summary}`;
+            if (toolResult.next_steps) {
+              responseText += `\nNext Steps: ${toolResult.next_steps}`;
+            }
+
+            // Log full result to console but strip screenshot from AI response
+            if (toolResult.screenshot) {
+              console.log(`📸 Result included a screenshot (${toolResult.screenshot.length} chars) - stripping from AI response text.`);
+              delete toolResult.screenshot;
+            }
+          } else {
+            responseText = JSON.stringify(toolResult, null, 2);
+          }
+        } else {
+          responseText = String(toolResult);
+        }
+
         result = {
           content: [{
             type: 'text',
-            text: JSON.stringify(toolResult, null, 2)
+            text: responseText
           }]
         };
         break;
