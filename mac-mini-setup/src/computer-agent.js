@@ -333,7 +333,7 @@ export async function runComputerAgent(options) {
   const {
     task,
     maxSteps = Number(process.env.COMPUTER_AGENT_MAX_STEPS || 20),
-    model = process.env.COMPUTER_AGENT_MODEL || 'gpt-5-2025-08-07',
+    model = process.env.COMPUTER_AGENT_MODEL || 'grok-4.1-fast',
     imageDetail = process.env.COMPUTER_AGENT_IMAGE_DETAIL || 'high',
     postActionWaitMs = Number(process.env.COMPUTER_AGENT_POST_ACTION_WAIT_MS || 300),
     includeFinalScreenshot = true

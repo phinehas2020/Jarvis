@@ -354,7 +354,8 @@ async function handleTool(name, args) {
           (async () => {
             computerAgentBusy = true;
             try {
-              const result = await runComputerAgent({ task, maxSteps });
+              const { model } = args;
+              const result = await runComputerAgent({ task, maxSteps, model });
 
               const summary = result.summary || 'Task completed without summary.';
               const status = result.status;
