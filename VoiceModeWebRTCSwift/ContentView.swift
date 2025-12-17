@@ -15,6 +15,7 @@ struct ContentView: View {
     
     // AppStorage properties
     @AppStorage("apiKey") private var apiKey = API_KEY
+    @AppStorage("xaiApiKey") private var xaiApiKey = ""
     @AppStorage("geminiApiKey") private var geminiApiKey = ""
     // gemini-2.5-flash-native-audio-preview-12-2025 is the GA native audio model for Live API voice conversations
     @AppStorage("geminiModel") private var geminiModel = "gemini-2.5-flash-native-audio-preview-12-2025"
@@ -311,6 +312,7 @@ struct ContentView: View {
             OptionsView(
                 apiKey: $apiKey,
                 geminiApiKey: $geminiApiKey,
+                xaiApiKey: $xaiApiKey,
                 geminiModel: $geminiModel,
                 geminiLiveEndpoint: $geminiLiveEndpoint,
                 systemMessage: $systemMessage,
@@ -335,7 +337,8 @@ struct ContentView: View {
                 voice: selectedVoice,
                 geminiApiKey: geminiApiKey,
                 geminiModel: geminiModel,
-                geminiLiveEndpoint: geminiLiveEndpoint
+                geminiLiveEndpoint: geminiLiveEndpoint,
+                xaiApiKey: xaiApiKey
             )
         }
     }
@@ -438,7 +441,8 @@ struct ContentView: View {
                                 voice: selectedVoice,
                                 geminiApiKey: geminiApiKey,
                                 geminiModel: geminiModel,
-                                geminiLiveEndpoint: geminiLiveEndpoint
+                                geminiLiveEndpoint: geminiLiveEndpoint,
+                                xaiApiKey: xaiApiKey
                             )
                         } else {
                             // For non-realtime models, show a message that they're not supported yet
@@ -652,9 +656,12 @@ struct ContentView: View {
     }
 }
 
+
+
 struct OptionsView: View {
     @Binding var apiKey: String
     @Binding var geminiApiKey: String
+    @Binding var xaiApiKey: String // Added
     @Binding var geminiModel: String
     @Binding var geminiLiveEndpoint: String
     @Binding var systemMessage: String
@@ -707,6 +714,21 @@ struct OptionsView: View {
                             .autocapitalization(.none)
 
                         Text("Tip: Use a Gemini native-audio model. Jarvis sends a response after you stop speaking (~0.5s silence).")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                if selectedProviderRaw == WebRTCManager.VoiceProvider.xai.rawValue {
+                    Section(header: Text("xAI Configuration")) {
+                        SecureField("Enter xAI API Key", text: $xaiApiKey)
+                            .autocapitalization(.none)
+                        
+                        Text("Using model: grok-beta")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        Text("Uses Grok Native Audio via WebSocket.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

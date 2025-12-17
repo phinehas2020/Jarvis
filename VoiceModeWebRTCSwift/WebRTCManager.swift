@@ -90,6 +90,7 @@ class WebRTCManager: NSObject, ObservableObject {
     enum VoiceProvider: String, CaseIterable, Identifiable {
         case openAI = "OpenAI Realtime"
         case gemini = "Gemini Native Audio"
+        case xai = "xAI Grok Beta"
         
         var id: String { self.rawValue }
     }
@@ -100,6 +101,7 @@ class WebRTCManager: NSObject, ObservableObject {
     @Published var errorMessage: String? = nil
 
     private var geminiClient: GeminiLiveClientAdapter?
+    private var xaiClient: XAILiveClient?
 
     // Private tool definitions helper
     func getLocalTools() -> [[String: Any]] {
@@ -1031,6 +1033,27 @@ class WebRTCManager: NSObject, ObservableObject {
                 "message": "Unable to access volume control"
             ]
         }
+    }
+    
+    func getBrightness() -> [String: Any] {
+        var brightness: CGFloat = 0.5
+        DispatchQueue.main.sync {
+            brightness = UIScreen.main.brightness
+        }
+        return [
+            "status": "success",
+            "brightness": Float(brightness),
+            "info": "Current screen brightness is \(Int(brightness * 100))%"
+        ]
+    }
+    
+    func getVolume() -> [String: Any] {
+        let volume = AVAudioSession.sharedInstance().outputVolume
+        return [
+            "status": "success",
+            "volume": volume,
+            "info": "Current system volume is \(Int(volume * 100))%"
+        ]
     }
     
     func triggerHapticFeedback(_ style: String) -> [String: Any] {
@@ -3296,14 +3319,20 @@ class WebRTCManager: NSObject, ObservableObject {
         voice: String,
         geminiApiKey: String? = nil,
         geminiModel: String? = nil,
-        geminiLiveEndpoint: String? = nil
+        geminiLiveEndpoint: String? = nil,
+        xaiApiKey: String? = nil
     ) {
+        print("🔍 WebRTCManager: Start Connection Called")
+        print("   - Provider: \(provider.rawValue)")
+        print("   - xAI API Key: \(xaiApiKey?.prefix(8) ?? "nil")...")
+        
         self.currentProvider = provider
         
         conversation.removeAll()
         conversationMap.removeAll()
         
         if provider == .gemini {
+            print("🔷 Using Gemini Provider")
             let resolvedApiKey = (geminiApiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let resolvedModel = (geminiModel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let resolvedEndpoint = (geminiLiveEndpoint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3360,6 +3389,113 @@ class WebRTCManager: NSObject, ObservableObject {
             client.connect()
             return
         }
+
+        if provider == .xai {
+            print("🚀 Using xAI Provider")
+            let resolvedApiKey = (xaiApiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            print("   - Resolved xAI API Key length: \(resolvedApiKey.count)")
+            
+            guard !resolvedApiKey.isEmpty else {
+                print("❌ xAI API Key is empty!")
+                let errorItem = ConversationItem(
+                    id: UUID().uuidString,
+                    role: "system",
+                    text: "Error: xAI API key is required."
+                )
+                DispatchQueue.main.async {
+                    self.conversation.append(errorItem)
+                    self.connectionStatus = .disconnected
+                }
+                return
+            }
+            
+            print("   - Cleaning up previous connections...")
+            peerConnection?.close()
+            peerConnection = nil
+            dataChannel = nil
+            audioTrack = nil
+            videoTrack = nil
+
+            self.currentApiKey = apiKey
+            geminiClient?.disconnect()
+            xaiClient?.disconnect()
+
+            // Gather all tools for XAI (same as OpenAI format)
+            var allTools: [[String: Any]] = []
+            allTools.append(contentsOf: getLocalTools())
+            allTools.append(contentsOf: mcpTools)
+            print("   - Gathered \(allTools.count) tools for XAI")
+
+            print("   - Initializing XAILiveClient...")
+            let client = XAILiveClient(
+                apiKey: resolvedApiKey,
+                model: "grok-beta",
+                voice: voice,
+                instructions: systemMessage,
+                tools: allTools
+            )
+
+            client.onConnectionStateChange = { [weak self] state in
+                print("🔌 XAI Client State Changed: \(state)")
+                DispatchQueue.main.async {
+                    switch state {
+                    case .connected: self?.connectionStatus = .connected
+                    case .connecting: self?.connectionStatus = .connecting
+                    case .disconnected: self?.connectionStatus = .disconnected
+                    }
+                }
+            }
+
+            client.onMessageReceived = { [weak self] role, text in
+                 let item = ConversationItem(id: UUID().uuidString, role: role, text: text)
+                 DispatchQueue.main.async {
+                     self?.conversation.append(item)
+                     self?.conversationMap[item.id] = item
+                 }
+            }
+
+            client.onToolCall = { [weak self] name, callId, arguments in
+                guard let self = self else { return }
+                print("🔧 XAI: Executing tool '\(name)' with callId: \(callId)")
+                
+                // Execute the tool (same logic as OpenAI)
+                Task { [weak self] in
+                    guard let self = self else { return }
+                    
+                    // Check if it's an MCP tool
+                    if self.mcpTools.contains(where: { ($0["name"] as? String) == name }) {
+                        // Parse arguments
+                        var args: [String: Any] = [:]
+                        if let data = arguments.data(using: .utf8),
+                           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            args = parsed
+                        }
+                        
+                        let result = await self.performMcpToolCall(name: name, arguments: args)
+                        self.xaiClient?.sendToolResult(callId: callId, result: result)
+                    } else {
+                        // Handle local tool - reuse existing logic
+                        self.handleXAILocalToolCall(name: name, callId: callId, arguments: arguments)
+                    }
+                }
+            }
+
+            client.onError = { [weak self] error in
+                print("❌ XAI Client Error: \(error)")
+                DispatchQueue.main.async {
+                    self?.errorMessage = error.localizedDescription
+                    self?.connectionStatus = .disconnected
+                }
+            }
+
+            self.xaiClient = client
+            print("   - Calling client.connect()...")
+            client.connect()
+            return
+        }
+        
+        print("🤖 Using OpenAI Provider (Default)")
         
         // OpenAI Logic below
 
@@ -3438,6 +3574,8 @@ class WebRTCManager: NSObject, ObservableObject {
         // Stop OpenAI connection
         peerConnection?.close()
         peerConnection = nil
+        geminiClient?.disconnect()
+        xaiClient?.disconnect()
         dataChannel = nil
         audioTrack = nil
         videoTrack = nil
@@ -3477,6 +3615,17 @@ class WebRTCManager: NSObject, ObservableObject {
             return
         }
 
+        if currentProvider == .xai {
+            let item = ConversationItem(id: UUID().uuidString, role: "user", text: trimmed)
+            DispatchQueue.main.async {
+                self.conversation.append(item)
+                self.conversationMap[item.id] = item
+                self.outgoingMessage = ""
+            }
+            xaiClient?.sendText(trimmed)
+            return
+        }
+        
         guard let dc = dataChannel else {
             return
         }
@@ -3672,7 +3821,7 @@ class WebRTCManager: NSObject, ObservableObject {
     
     /// Posts our SDP offer to the Realtime API, returns the answer SDP.
     private func fetchRemoteSDP(apiKey: String, localSdp: String) async throws -> String {
-        let baseUrl = "https://api.openai.com/v1/realtime"
+        let baseUrl = (currentProvider == .xai) ? "https://api.x.ai/v1/realtime" : "https://api.openai.com/v1/realtime"
         guard let url = URL(string: "\(baseUrl)?model=\(modelName)") else {
             throw URLError(.badURL)
         }
@@ -4165,6 +4314,79 @@ extension WebRTCManager: GeminiLiveClientAdapterDelegate {
             }
         } else {
             print("⚠️ Unknown Gemini tool call: \(tool)")
+        }
+    }
+    
+    // MARK: - XAI Tool Handling
+    
+    /// Handle local tool calls from XAI client
+    private func handleXAILocalToolCall(name: String, callId: String, arguments: String) {
+        // Parse arguments
+        var argDict: [String: Any] = [:]
+        if let data = arguments.data(using: .utf8),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            argDict = parsed
+        }
+        
+        // Execute tool based on name and send result back
+        Task { [weak self] in
+            guard let self = self else { return }
+            var result: [String: Any] = ["error": "Unknown tool"]
+            
+            switch name {
+            case "search_contacts":
+                let query = argDict["query"] as? String ?? ""
+                let limit = argDict["limit"] as? Int ?? 10
+                let contacts = self.searchContacts(query: query, limit: limit)
+                result = ["contacts": contacts, "count": contacts.count]
+                
+            case "set_brightness":
+                let level = argDict["level"] as? Double ?? 0.5
+                result = self.setBrightness(Float(level))
+                
+            case "get_brightness":
+                result = self.getBrightness()
+                
+            case "set_volume":
+                let level = argDict["level"] as? Double ?? 0.5
+                result = self.setVolume(Float(level))
+                
+            case "get_volume":
+                result = self.getVolume()
+                
+            case "create_reminder":
+                let title = argDict["title"] as? String ?? ""
+                let dueDateStr = argDict["due_date"] as? String
+                var dueDate: Date? = nil
+                
+                if let dateStr = dueDateStr {
+                     let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
+                     let matches = detector?.matches(in: dateStr, options: [], range: NSRange(location: 0, length: dateStr.utf16.count))
+                     dueDate = matches?.first?.date
+                }
+                
+                result = self.createReminder(title: title, dueDate: dueDate)
+                
+            case "create_note":
+                let title = argDict["title"] as? String ?? ""
+                let content = argDict["content"] as? String ?? ""
+                result = self.createNote(title: title, content: content)
+                
+            case "send_imessage", "fetch_messages", "get_status":
+                // These are MCP tools, should be handled via MCP
+                let mcpResult = await self.performMcpToolCall(name: name, arguments: argDict)
+                self.xaiClient?.sendToolResult(callId: callId, result: mcpResult)
+                return
+                
+            default:
+                print("⚠️ Unknown XAI local tool: \(name)")
+                result = ["error": "Unknown tool: \(name)"]
+            }
+            
+            // Send result back to XAI
+            if let resultJSON = self.jsonString(from: result) {
+                self.xaiClient?.sendToolResult(callId: callId, result: resultJSON)
+            }
         }
     }
 }
