@@ -253,6 +253,8 @@ async function executeToolAction(action) {
       return browser_scroll({ amount: params.amount });
     case 'browser_extract_text':
       return browser_extract_text();
+    case 'browser_screenshot':
+      return browser_screenshot({ fullPage: params.fullPage });
 
     default:
       throw new Error(`Unknown tool: ${tool}`);

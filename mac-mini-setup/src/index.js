@@ -169,7 +169,9 @@ const TOOLS = [
         model: { type: 'string', description: 'Override model (default: COMPUTER_AGENT_MODEL or gpt-5-2025-08-07)' },
         imageDetail: { type: 'string', enum: ['low', 'high', 'auto'], description: 'Vision detail level', default: 'high' },
         postActionWaitMs: { type: 'number', description: 'Delay after each action before next screenshot', default: 300 },
-        includeFinalScreenshot: { type: 'boolean', description: 'Include final screenshot base64 in the response', default: true }
+        includeFinalScreenshot: { type: 'boolean', description: 'Include final screenshot base64 in the response', default: true },
+        background: { type: 'boolean', description: 'Run asynchronously and notify on completion', default: false },
+        notifyPhone: { type: 'string', description: 'Phone number to text result to if running in background' }
       },
       required: ['task']
     }
@@ -340,12 +342,50 @@ async function handleTool(name, args) {
           return { error: 'Computer agent is already running a task. Please wait.' };
         }
         computerAgentBusy = true;
+
         try {
-          // Dynamic import allows updates to computer-agent.js without restarting server (if we were clearing cache, but we aren't)
-          // But mainly it keeps load time fast.
           const { runComputerAgent } = await import('./computer-agent.js');
-          return await runComputerAgent(args);
+
+          // Background Mode
+          if (args.background) {
+            // Start process but don't await result for the HTTP response
+            runComputerAgent(args)
+              .then(async (result) => {
+                const summary = result.summary || 'Task completed without summary.';
+                const status = result.status;
+                const msg = `🖥️ Computer Agent Finished (${status}):\n${summary}`;
+
+                console.log('✅ Background task finished:', summary);
+
+                if (args.notifyPhone) {
+                  await handleTool('send_imessage', { to: args.notifyPhone, message: msg });
+                }
+              })
+              .catch(async (err) => {
+                console.error('❌ Background task failed:', err);
+                if (args.notifyPhone) {
+                  await handleTool('send_imessage', { to: args.notifyPhone, message: `❌ Computer Agent Failed: ${err.message}` });
+                }
+              })
+              .finally(() => {
+                computerAgentBusy = false;
+              });
+
+            return {
+              status: 'queued',
+              message: 'Task started in background. You will be notified when complete.',
+              taskId: Date.now()
+            };
+          }
+
+          // Foreground Mode (Wait for result)
+          const result = await runComputerAgent(args);
+          computerAgentBusy = false; // logic was in finally, but here we can't use finally block easily if we return in try
+          return result;
+
         } catch (error) {
+          computerAgentBusy = false; // ensure we clear flag on sync error
+
           const message = String(error?.message || error);
           if (error.code === 'MODULE_NOT_FOUND') {
             return { error: "Missing dependency: openai. Install with: npm install openai" };
@@ -354,9 +394,8 @@ async function handleTool(name, args) {
             return { error: 'OPENAI_API_KEY is required in the server environment to use execute_task' };
           }
           return { error: message };
-        } finally {
-          computerAgentBusy = false;
         }
+        // Note: We removed the 'finally' block because we handle busy=false differently for background/foreground
       }
 
       // Browser Tools Handlers
