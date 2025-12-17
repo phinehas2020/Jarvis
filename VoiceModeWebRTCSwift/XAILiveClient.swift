@@ -49,6 +49,11 @@ class XAILiveClient: NSObject {
     // Tools for function calling
     private var tools: [[String: Any]] = []
     
+    // Reconnection with exponential backoff
+    private var reconnectAttempts = 0
+    private let maxReconnectAttempts = 5
+    private var reconnectTimer: Timer?
+    
     // Callbacks
     var onConnectionStateChange: ((ConnectionState) -> Void)?
     var onMessageReceived: ((_ role: String, _ text: String) -> Void)?
@@ -304,9 +309,36 @@ class XAILiveClient: NSObject {
                 
             case .failure(let error):
                 print("❌ XAI Receive Error: \(error.localizedDescription)")
-                self.disconnect()
-                self.onError?(error)
+                self.handleConnectionError(error)
             }
+        }
+    }
+    
+    private func handleConnectionError(_ error: Error) {
+        // Don't reconnect if manually disconnected
+        guard isConnected else { return }
+        
+        stopAudio()
+        webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
+        webSocketTask = nil
+        isConnected = false
+        sessionConfirmed = false
+        
+        // Check if we should attempt reconnection
+        if reconnectAttempts < maxReconnectAttempts {
+            let delay = pow(2.0, Double(reconnectAttempts)) // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+            reconnectAttempts += 1
+            print("⏳ XAI: Attempting reconnection in \(Int(delay))s (attempt \(reconnectAttempts)/\(maxReconnectAttempts))")
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self else { return }
+                self.connect()
+            }
+        } else {
+            print("❌ XAI: Max reconnection attempts reached")
+            reconnectAttempts = 0
+            onConnectionStateChange?(.disconnected)
+            onError?(error)
         }
     }
     
@@ -335,6 +367,7 @@ class XAILiveClient: NSObject {
             }
             if !sessionConfirmed {
                 sessionConfirmed = true
+                reconnectAttempts = 0 // Reset on successful connection
                 onConnectionStateChange?(.connected)
                 startAudio()
             }
