@@ -441,16 +441,21 @@ function authenticate(req, res, next) {
 }
 
 // ============================================================================
-// MCP Protocol Handler (Streamable HTTP)
+// MCP Protocol Handler (Shared between HTTP and WebSocket)
 // ============================================================================
 
-app.post('/mcp', authenticate, async (req, res) => {
-  const { jsonrpc, method, params, id } = req.body;
+/**
+ * Process an MCP JSON-RPC request and return the response object.
+ * @param {object} request - The JSON-RPC request
+ * @returns {Promise<object>} - The JSON-RPC response
+ */
+async function processMcpRequest(request) {
+  const { jsonrpc, method, params, id } = request;
 
   console.log(`📥 MCP Request: ${method}`, params ? JSON.stringify(params).substring(0, 200) : '');
 
   if (jsonrpc !== '2.0') {
-    return res.json({ jsonrpc: '2.0', error: { code: -32600, message: 'Invalid Request' }, id });
+    return { jsonrpc: '2.0', error: { code: -32600, message: 'Invalid Request' }, id };
   }
 
   try {
@@ -486,29 +491,34 @@ app.post('/mcp', authenticate, async (req, res) => {
         break;
 
       case 'notifications/initialized':
-        // Acknowledgment, no response needed
         result = {};
         break;
 
       default:
-        return res.json({
+        return {
           jsonrpc: '2.0',
           error: { code: -32601, message: `Method not found: ${method}` },
           id
-        });
+        };
     }
 
     console.log(`📤 MCP Response for ${method}:`, JSON.stringify(result).substring(0, 200));
-    res.json({ jsonrpc: '2.0', result, id });
+    return { jsonrpc: '2.0', result, id };
 
   } catch (error) {
     console.error(`❌ MCP Error:`, error);
-    res.json({
+    return {
       jsonrpc: '2.0',
       error: { code: -32603, message: error.message },
       id
-    });
+    };
   }
+}
+
+// HTTP Endpoint
+app.post('/mcp', authenticate, async (req, res) => {
+  const response = await processMcpRequest(req.body);
+  res.json(response);
 });
 
 // Health check endpoint
@@ -536,65 +546,17 @@ wss.on('connection', (ws, req) => {
   ws.on('message', async (message) => {
     try {
       const msgText = message.toString();
-      console.log(`📥 MCP (WS) Request: ${msgText.substring(0, 100)}...`);
-
       const request = JSON.parse(msgText);
-      const { jsonrpc, method, params, id } = request;
 
-      // Basic validation
-      if (jsonrpc !== '2.0') {
-        ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32600, message: 'Invalid Request' }, id }));
-        return;
-      }
-
-      // Check for auth (simple check for now, can be expanded)
-      // Note: In WS, auth is often done via query params or initial handshake.
-      // For now, we'll assume if they can connect, they are okay, OR we can check params if the client sends them.
-      // Ideally client sends {"method": "initialize", "params": { "authorization": "..." }} if custom auth needed.
-
-      let result;
-      switch (method) {
-        case 'initialize':
-          result = {
-            protocolVersion: '2024-11-05',
-            capabilities: { tools: {} },
-            serverInfo: { name: 'bluebubbles-mcp', version: '1.0.0' }
-          };
-          break;
-
-        case 'tools/list':
-          result = { tools: TOOLS };
-          break;
-
-        case 'tools/call':
-          const { name, arguments: args } = params;
-          // IMPORTANT: computer-agent logic needs to be aware it might not be able to return streaming progress easily here yet
-          const toolResult = await handleTool(name, args || {});
-          result = {
-            content: [{
-              type: 'text',
-              text: JSON.stringify(toolResult, null, 2)
-            }]
-          };
-          break;
-
-        case 'notifications/initialized':
-          result = {};
-          break;
-
-        default:
-          throw new Error(`Method not found: ${method}`);
-      }
-
-      const response = { jsonrpc: '2.0', result, id };
-      console.log(`📤 MCP (WS) Response: ${JSON.stringify(response).substring(0, 100)}...`);
+      // Use the shared MCP request handler
+      const response = await processMcpRequest(request);
       ws.send(JSON.stringify(response));
 
     } catch (error) {
-      console.error(`❌ MCP (WS) Error:`, error);
+      console.error(`❌ MCP (WS) Parse Error:`, error);
       ws.send(JSON.stringify({
         jsonrpc: '2.0',
-        error: { code: -32603, message: error.message },
+        error: { code: -32700, message: 'Parse error: ' + error.message },
         id: null
       }));
     }
