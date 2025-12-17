@@ -8,6 +8,15 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import {
+  browser_navigate,
+  browser_click,
+  browser_type,
+  browser_scroll,
+  browser_extract_text,
+  browser_screenshot,
+  browser_close
+} from './browser-tools.js';
 
 const app = express();
 app.use(cors());
