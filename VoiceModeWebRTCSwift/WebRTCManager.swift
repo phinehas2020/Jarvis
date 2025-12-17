@@ -105,6 +105,13 @@ class WebRTCManager: NSObject, ObservableObject {
 
     private var geminiClient: GeminiLiveClientAdapter?
     private var xaiClient: XAILiveClient?
+    
+    // Persistent MCP connection for background notifications
+    private var mcpWebSocketTask: URLSessionWebSocketTask?
+    private var isMcpConnecting = false
+    private var mcpPendingResponses: [String: ([String: Any]) -> Void] = [:]
+    private let mcpLock = NSLock()
+    private let mcpNotificationQueue = DispatchQueue(label: "com.jarvis.mcp.notifications")
 
     // Private tool definitions helper
     func getLocalTools() -> [[String: Any]] {
@@ -504,7 +511,8 @@ class WebRTCManager: NSObject, ObservableObject {
                     "type": "object",
                     "properties": [
                         "task": ["type": "string", "description": "Clear instructions for what to do on the computer"],
-                        "max_steps": ["type": "integer", "description": "Maximum steps allowed (default: 20)"]
+                        "max_steps": ["type": "integer", "description": "Maximum steps allowed (default: 20)"],
+                        "background": ["type": "boolean", "description": "If true, the task will run in the background and I will notify you when it's done. Use this for tasks that take more than 10 seconds."]
                     ],
                     "required": ["task"]
                 ]
@@ -2206,16 +2214,8 @@ class WebRTCManager: NSObject, ObservableObject {
         toolName: String,
         toolArguments: [String: Any]
     ) async throws -> [String: Any] {
-        var request = URLRequest(url: serverUrl)
-        request.setValue("mcp", forHTTPHeaderField: "Sec-WebSocket-Protocol")
-        if let header = normalizedMcpAuthorizationHeader(authorization) {
-            request.setValue(header, forHTTPHeaderField: "Authorization")
-        }
-
-        let task = URLSession.shared.webSocketTask(with: request)
-        task.resume()
-        defer { task.cancel(with: .normalClosure, reason: nil) }
-
+        try await ensureMcpConnected(serverUrl: serverUrl, authorization: authorization)
+        
         let rpcId = UUID().uuidString
         let payload: [String: Any] = [
             "jsonrpc": "2.0",
@@ -2232,32 +2232,169 @@ class WebRTCManager: NSObject, ObservableObject {
             throw NSError(domain: "WebRTCManager.MCP", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unable to encode MCP request"])
         }
 
-        try await task.send(.string(jsonText))
-
-        for _ in 0..<10 {
-            let message = try await task.receive()
-            let responseText: String
-            switch message {
-            case .string(let text):
-                responseText = text
-            case .data(let data):
-                responseText = String(data: data, encoding: .utf8) ?? ""
-            @unknown default:
-                responseText = ""
+        return try await withCheckedThrowingContinuation { continuation in
+            mcpLock.lock()
+            mcpPendingResponses[rpcId] = { response in
+                continuation.resume(returning: response)
             }
-
-            guard !responseText.isEmpty,
-                  let responseData = responseText.data(using: .utf8),
-                  let responseObj = try JSONSerialization.jsonObject(with: responseData) as? [String: Any] else {
-                continue
+            mcpLock.unlock()
+            
+            Task {
+                do {
+                    try await mcpWebSocketTask?.send(.string(jsonText))
+                } catch {
+                    mcpLock.lock()
+                    _ = mcpPendingResponses.removeValue(forKey: rpcId)
+                    mcpLock.unlock()
+                    continuation.resume(throwing: error)
+                }
             }
-
-            if let responseId = responseObj["id"] as? String, responseId == rpcId {
-                return responseObj
+            
+            // Timeout after 120 seconds for computer agent
+            DispatchQueue.global().asyncAfter(deadline: .now() + 120) { [weak self] in
+                guard let self = self else { return }
+                self.mcpLock.lock()
+                if let _ = self.mcpPendingResponses.removeValue(forKey: rpcId) {
+                    self.mcpLock.unlock()
+                    continuation.resume(throwing: NSError(domain: "WebRTCManager.MCP", code: -4, userInfo: [NSLocalizedDescriptionKey: "MCP Request Timed Out"]))
+                } else {
+                    self.mcpLock.unlock()
+                }
             }
         }
+    }
 
-        throw NSError(domain: "WebRTCManager.MCP", code: -2, userInfo: [NSLocalizedDescriptionKey: "No MCP response received"])
+    private func ensureMcpConnected(serverUrl: URL, authorization: String?) async throws {
+        mcpLock.lock()
+        if mcpWebSocketTask != nil && mcpWebSocketTask?.state == .running {
+            mcpLock.unlock()
+            return
+        }
+        
+        if isMcpConnecting {
+            mcpLock.unlock()
+            // Wait for existing connection attempt
+            try await Task.sleep(nanoseconds: 500 * 1_000_000)
+            return try await ensureMcpConnected(serverUrl: serverUrl, authorization: authorization)
+        }
+        
+        isMcpConnecting = true
+        mcpLock.unlock()
+        
+        print("🔌 MCP: Establishing persistent connection to \(serverUrl.absoluteString)...")
+        
+        var request = URLRequest(url: serverUrl)
+        request.setValue("mcp", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        if let header = normalizedMcpAuthorizationHeader(authorization) {
+            request.setValue(header, forHTTPHeaderField: "Authorization")
+        }
+
+        let task = URLSession.shared.webSocketTask(with: request)
+        task.resume()
+        
+        mcpLock.lock()
+        self.mcpWebSocketTask = task
+        self.isMcpConnecting = false
+        mcpLock.unlock()
+        
+        startMcpListeningLoop(task: task)
+    }
+
+    private func startMcpListeningLoop(task: URLSessionWebSocketTask) {
+        task.receive { [weak self] result in
+            guard let self = self, task.state == .running else { return }
+            
+            switch result {
+            case .success(let message):
+                let text: String
+                switch message {
+                case .string(let s): text = s
+                case .data(let d): text = String(data: d, encoding: .utf8) ?? ""
+                @unknown default: text = ""
+                }
+                
+                self.handleIncomingMcpMessage(text)
+                self.startMcpListeningLoop(task: task)
+                
+            case .failure(let error):
+                print("❌ MCP WebSocket Error: \(error.localizedDescription)")
+                self.mcpLock.lock()
+                if self.mcpWebSocketTask === task {
+                    self.mcpWebSocketTask = nil
+                }
+                self.mcpLock.unlock()
+            }
+        }
+    }
+
+    private func handleIncomingMcpMessage(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        
+        // 1. Check for RPC Response
+        if let id = json["id"] as? String {
+            mcpLock.lock()
+            let callback = mcpPendingResponses.removeValue(forKey: id)
+            mcpLock.unlock()
+            callback?(json)
+            return
+        }
+        
+        // 2. Check for Notification (method without id)
+        if let method = json["method"] as? String {
+            handleMcpNotification(method: method, params: json["params"] as? [String: Any])
+        }
+    }
+
+    private func handleMcpNotification(method: String, params: [String: Any]?) {
+        print("🔔 Received MCP Notification: \(method)")
+        
+        if method == "notifications/task_result", let params = params {
+            let task = params["task"] as? String ?? "Unknown Task"
+            let summary = params["summary"] as? String ?? ""
+            let status = params["status"] as? String ?? ""
+            
+            let message = "Jarvis, a background task has finished.\nTask: \(task)\nStatus: \(status)\nResult: \(summary)\n\nPlease briefly notify the user of this result."
+            
+            print("🚀 Injecting background result into conversation...")
+            
+            // Inject as a hidden user message that triggers the AI to speak
+            Task {
+                await self.injectSystemNotification(message)
+            }
+        }
+    }
+    
+    private func injectSystemNotification(_ text: String) async {
+        // For OpenAI/Grok, we create a conversation item
+        if currentProvider == .openAI || currentProvider == .xai {
+            let payload: [String: Any] = [
+                "type": "conversation.item.create",
+                "item": [
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        ["type": "input_text", "text": text]
+                    ]
+                ]
+            ]
+            
+            if let json = jsonString(from: payload) {
+                if currentProvider == .openAI {
+                    let buffer = RTCDataBuffer(data: json.data(using: .utf8)!, isBinary: false)
+                    dataChannel?.sendData(buffer)
+                } else {
+                    xaiClient?.sendRawPayload(json)
+                }
+                
+                // Request a response so Jarvis actually speaks
+                try? await Task.sleep(nanoseconds: 500 * 1_000_000)
+                requestAssistantResponseAfterTool(force: true, context: "background-notification")
+            }
+        } else if currentProvider == .gemini {
+            // For Gemini, we send a user turn
+            geminiClient?.sendText(text)
+        }
     }
 
     /// Encode JSON dictionaries into a string payload for the realtime API
@@ -2333,6 +2470,7 @@ class WebRTCManager: NSObject, ObservableObject {
     
     /// Handle local function calls from the AI
     private func handleLocalFunctionCall(itemId: String, callId: String, name: String, arguments: String) {
+        let dc = dataChannel // Restore reference for OpenAI path below
         
         var functionResult: [String: Any] = [:]
         
@@ -2350,12 +2488,35 @@ class WebRTCManager: NSObject, ObservableObject {
             
             Task.detached(priority: .userInitiated) { [weak self] in
                 guard let self else { return }
-                let results = self.searchContacts(query: query, limit: limit)
+                // Delegate to ToolManager
+                let results = ToolManager.shared.searchContacts(query: query, limit: limit)
                 guard let output = self.jsonString(from: results) else { return }
 
                 await MainActor.run {
                     self.sendFunctionCallOutput(previousItemId: itemId, callId: callId, output: output)
                 }
+            }
+            return
+            
+        case "set_brightness":
+            guard let argData = arguments.data(using: .utf8),
+                  let argDict = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
+                  let level = argDict["level"] as? Double else { return }
+            
+            let result = ToolManager.shared.setBrightness(to: Float(level))
+            if let output = self.jsonString(from: result) {
+                self.sendFunctionCallOutput(previousItemId: itemId, callId: callId, output: output)
+            }
+            return
+            
+        case "set_volume":
+            guard let argData = arguments.data(using: .utf8),
+                  let argDict = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
+                  let level = argDict["level"] as? Double else { return }
+            
+            let result = ToolManager.shared.setVolume(to: Float(level))
+            if let output = self.jsonString(from: result) {
+                self.sendFunctionCallOutput(previousItemId: itemId, callId: callId, output: output)
             }
             return
             
@@ -2675,48 +2836,7 @@ class WebRTCManager: NSObject, ObservableObject {
                 ]
             ]
 
-        // System Control Tools
-        case "set_brightness":
-            guard let argData = arguments.data(using: .utf8),
-                  let argDict = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
-                  let brightness = argDict["brightness"] as? Float else {
-                print("❌ Invalid arguments for set_brightness")
-                return
-            }
-            
-            let result = setBrightness(brightness)
-            let resultJSON = try! String(data: JSONSerialization.data(withJSONObject: result, options: []), encoding: .utf8)!
-            
-            functionResult = [
-                "type": "conversation.item.create",
-                "previous_item_id": itemId,
-                "item": [
-                    "type": "function_call_output",
-                    "call_id": callId,
-                    "output": resultJSON
-                ]
-            ]
-
-        case "set_volume":
-            guard let argData = arguments.data(using: .utf8),
-                  let argDict = try? JSONSerialization.jsonObject(with: argData) as? [String: Any],
-                  let volume = argDict["volume"] as? Float else {
-                print("❌ Invalid arguments for set_volume")
-                return
-            }
-            
-            let result = setVolume(volume)
-            let resultJSON = try! String(data: JSONSerialization.data(withJSONObject: result, options: []), encoding: .utf8)!
-            
-            functionResult = [
-                "type": "conversation.item.create",
-                "previous_item_id": itemId,
-                "item": [
-                    "type": "function_call_output",
-                    "call_id": callId,
-                    "output": resultJSON
-                ]
-            ]
+        // Other tools follow...
 
         case "trigger_haptic":
             guard let argData = arguments.data(using: .utf8),
@@ -3188,7 +3308,7 @@ class WebRTCManager: NSObject, ObservableObject {
 
             let system = argDict["system"] as? String
             let trimmedModel = (argDict["model"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let delegatedModel = (trimmedModel?.isEmpty == false ? trimmedModel : nil) ?? "gpt-5-2025-08-07"
+            let delegatedModel = (trimmedModel?.isEmpty == false ? trimmedModel : nil) ?? "gpt-4o"
             let maxTokens = argDict["max_output_tokens"] as? Int
 
             guard !currentApiKey.isEmpty else {
@@ -3242,14 +3362,19 @@ class WebRTCManager: NSObject, ObservableObject {
             }
             
             let maxSteps = argDict["max_steps"] as? Int
+            let background = argDict["background"] as? Bool ?? false
             
-            print("🖥️ Delegating task to computer agent: \(task)")
+            print("🖥️ Delegating task to computer agent: \(task) (background: \(background))")
             
             Task.detached(priority: .userInitiated) { [weak self] in
                 guard let self else { return }
                 
                 var toolArgs: [String: Any] = ["task": task]
                 if let maxSteps { toolArgs["maxSteps"] = maxSteps }
+                if background { 
+                    toolArgs["background"] = true 
+                    // Optional: could add notifyPhone here to get an SMS too
+                }
                 
                 // Call the MCP tool 'execute_task' exposed by the bridge
                 let resultJSON = await self.performMcpToolCall(name: "execute_task", arguments: toolArgs)
@@ -3268,7 +3393,7 @@ class WebRTCManager: NSObject, ObservableObject {
         do {
             let jsonData = try JSONSerialization.data(withJSONObject: functionResult)
             let buffer = RTCDataBuffer(data: jsonData, isBinary: false)
-            dc.sendData(buffer)
+            dc?.sendData(buffer)
             print("✅ Sent function call result for \(name)")
         } catch {
             print("❌ Failed to send function call result: \(error)")

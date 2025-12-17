@@ -272,6 +272,15 @@ class XAILiveClient: NSObject {
         sendJSON(event)
     }
 
+    func sendRawPayload(_ json: String) {
+        let message = URLSessionWebSocketTask.Message.string(json)
+        webSocketTask?.send(message) { error in
+            if let error = error {
+                print("❌ XAI Send Raw Error: \(error.localizedDescription)")
+            }
+        }
+    }
+    
     private func sendJSON(_ dict: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
               let string = String(data: data, encoding: .utf8) else { return }

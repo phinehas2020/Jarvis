@@ -338,54 +338,77 @@ async function handleTool(name, args) {
       }
 
       case 'execute_task': {
+        const { task, maxSteps, background = false, notifyPhone } = args;
+
         if (computerAgentBusy) {
           return { error: 'Computer agent is already running a task. Please wait.' };
         }
+
+        const { runComputerAgent } = await import('./computer-agent.js');
+
+        if (background) {
+          // Asynchronous Background Mode
+          console.log(`🚀 Starting background task: ${task}`);
+
+          // Start the task in a detached promise
+          (async () => {
+            computerAgentBusy = true;
+            try {
+              const result = await runComputerAgent({ task, maxSteps });
+
+              const summary = result.summary || 'Task completed without summary.';
+              const status = result.status;
+              const msg = `🖥️ Computer Agent Finished (${status}):\n${summary}`;
+
+              console.log('✅ Background task finished:', summary);
+
+              // 1. Notify via WebSocket if possible
+              if (context?.sendNotification) {
+                console.log(`🔔 Sending WS notification to client...`);
+                context.sendNotification('notifications/task_result', {
+                  task,
+                  status,
+                  summary,
+                  next_steps: result.next_steps
+                });
+              }
+
+              // 2. Notify via iMessage if requested
+              if (notifyPhone) {
+                await handleTool('send_imessage', { to: notifyPhone, message: msg });
+              }
+            } catch (error) {
+              console.error(`❌ Background task error:`, error);
+
+              if (context?.sendNotification) {
+                context.sendNotification('notifications/task_result', {
+                  task,
+                  status: 'error',
+                  summary: error.message
+                });
+              }
+
+              if (notifyPhone) {
+                await handleTool('send_imessage', { to: notifyPhone, message: `❌ Computer Agent Failed: ${error.message}` });
+              }
+            } finally {
+              computerAgentBusy = false;
+            }
+          })();
+
+          return {
+            status: "started",
+            message: "I have started the task in the background. I will notify you through the phone when it is finished.",
+            job_id: Date.now()
+          };
+        }
+
+        // Foreground Mode (Wait for result)
         computerAgentBusy = true;
-
         try {
-          const { runComputerAgent } = await import('./computer-agent.js');
-
-          // Background Mode
-          if (args.background) {
-            // Start process but don't await result for the HTTP response
-            runComputerAgent(args)
-              .then(async (result) => {
-                const summary = result.summary || 'Task completed without summary.';
-                const status = result.status;
-                const msg = `🖥️ Computer Agent Finished (${status}):\n${summary}`;
-
-                console.log('✅ Background task finished:', summary);
-
-                if (args.notifyPhone) {
-                  await handleTool('send_imessage', { to: args.notifyPhone, message: msg });
-                }
-              })
-              .catch(async (err) => {
-                console.error('❌ Background task failed:', err);
-                if (args.notifyPhone) {
-                  await handleTool('send_imessage', { to: args.notifyPhone, message: `❌ Computer Agent Failed: ${err.message}` });
-                }
-              })
-              .finally(() => {
-                computerAgentBusy = false;
-              });
-
-            return {
-              status: 'queued',
-              message: 'Task started in background. You will be notified when complete.',
-              taskId: Date.now()
-            };
-          }
-
-          // Foreground Mode (Wait for result)
           const result = await runComputerAgent(args);
-          computerAgentBusy = false; // logic was in finally, but here we can't use finally block easily if we return in try
           return result;
-
         } catch (error) {
-          computerAgentBusy = false; // ensure we clear flag on sync error
-
           const message = String(error?.message || error);
           if (error.code === 'MODULE_NOT_FOUND') {
             return { error: "Missing dependency: openai. Install with: npm install openai" };
@@ -394,8 +417,9 @@ async function handleTool(name, args) {
             return { error: 'OPENAI_API_KEY is required in the server environment to use execute_task' };
           }
           return { error: message };
+        } finally {
+          computerAgentBusy = false;
         }
-        // Note: We removed the 'finally' block because we handle busy=false differently for background/foreground
       }
 
       // Browser Tools Handlers
@@ -447,9 +471,10 @@ function authenticate(req, res, next) {
 /**
  * Process an MCP JSON-RPC request and return the response object.
  * @param {object} request - The JSON-RPC request
+ * @param {object} context - Optional context (e.g. WebSocket or connection info)
  * @returns {Promise<object>} - The JSON-RPC response
  */
-async function processMcpRequest(request) {
+async function processMcpRequest(request, context = {}) {
   const { jsonrpc, method, params, id } = request;
 
   console.log(`📥 MCP Request: ${method}`, params ? JSON.stringify(params).substring(0, 200) : '');
@@ -480,8 +505,8 @@ async function processMcpRequest(request) {
         break;
 
       case 'tools/call':
-        const { name, arguments: args } = params;
-        let toolResult = await handleTool(name, args || {});
+        const { name: toolName, arguments: toolArgs } = params;
+        let toolResult = await handleTool(toolName, toolArgs || {}, context);
 
         // Special handling for bulky results (like execute_task)
         let responseText = '';
@@ -566,17 +591,31 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws, req) => {
   console.log(`🔌 Client connected from ${req.socket.remoteAddress}`);
 
+  const context = {
+    ws,
+    sendNotification: (method, params) => {
+      if (ws.readyState === 1) { // OPEN
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0',
+          method,
+          params
+        }));
+      }
+    }
+  };
+
   ws.on('message', async (message) => {
     try {
       const msgText = message.toString();
       const request = JSON.parse(msgText);
 
-      // Use the shared MCP request handler
-      const response = await processMcpRequest(request);
-      ws.send(JSON.stringify(response));
-
+      // Use the shared MCP request handler with context
+      const response = await processMcpRequest(request, context);
+      if (response) {
+        ws.send(JSON.stringify(response));
+      }
     } catch (error) {
-      console.error(`❌ MCP (WS) Parse Error:`, error);
+      console.error(`❌ WS Error:`, error);
       ws.send(JSON.stringify({
         jsonrpc: '2.0',
         error: { code: -32700, message: 'Parse error: ' + error.message },
