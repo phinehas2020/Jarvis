@@ -200,28 +200,8 @@ final class GeminiLiveClientAdapter: NSObject {
     }
 
     private func configureGeminiAudioSession() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .videoChat, options: [
-                .defaultToSpeaker,
-                .allowBluetoothHFP,
-                .allowBluetoothA2DP,
-                .mixWithOthers,
-                .duckOthers
-            ])
-
-            if let builtInMic = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
-                try? session.setPreferredInput(builtInMic)
-            }
-
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
-            try? session.overrideOutputAudioPort(.speaker)
-            let inputs = session.currentRoute.inputs.map { $0.portType.rawValue }.joined(separator: ",")
-            let outputs = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
-            print("🔊 Gemini audio route configured (category: \(session.category.rawValue), mode: \(session.mode.rawValue), in: \(inputs), out: \(outputs))")
-        } catch {
-            print("❌ Gemini audio session config error: \(error)")
-        }
+        AudioSessionManager.shared.configureForRecording(sampleRate: 16000)
+        AudioSessionManager.shared.forceToSpeaker()
     }
 
     private func setupCallbacks() {
@@ -305,6 +285,7 @@ final class GeminiLiveClientAdapter: NSObject {
         audioRecorder.stopRecording()
         client.disconnect()
         _isConnected = false
+        AudioSessionManager.shared.deactivate()
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.delegate?.geminiLiveClientAdapter(self, didChangeStatus: .disconnected)

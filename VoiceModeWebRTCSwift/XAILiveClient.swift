@@ -71,42 +71,18 @@ class XAILiveClient: NSObject {
     }
     
     private func configureAudioSession() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            print("🔊 XAI: Configuring AVAudioSession: playAndRecord, voiceChat")
-            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .defaultToSpeaker, .mixWithOthers])
-            try session.setPreferredSampleRate(24000)
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
-            print("🔊 XAI: Audio session active, sample rate: \(session.sampleRate)Hz")
-        } catch {
-            print("❌ XAI Audio Session Config Error: \(error)")
-        }
+        AudioSessionManager.shared.configureForVoiceChat(sampleRate: 24000)
     }
     
     private func setupAudioInterruptionHandling() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleAudioInterruption),
-            name: AVAudioSession.interruptionNotification,
-            object: nil
+        AudioSessionManager.shared.setInterruptionHandlers(
+            began: { [weak self] in
+                self?.playerNode.pause()
+            },
+            ended: { [weak self] in
+                self?.restartAudioEngineIfNeeded()
+            }
         )
-    }
-    
-    @objc private func handleAudioInterruption(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-        
-        switch type {
-        case .began:
-            print("⚠️ XAI: Audio interruption began")
-            playerNode.pause()
-        case .ended:
-            print("✅ XAI: Audio interruption ended, restarting engine...")
-            restartAudioEngineIfNeeded()
-        @unknown default:
-            break
-        }
     }
     
     private func restartAudioEngineIfNeeded() {
@@ -164,7 +140,7 @@ class XAILiveClient: NSObject {
         isConnected = false
         sessionConfirmed = false
         onConnectionStateChange?(.disconnected)
-        NotificationCenter.default.removeObserver(self)
+        AudioSessionManager.shared.deactivate()
     }
     
     func sendText(_ text: String) {
