@@ -8,6 +8,7 @@ protocol GeminiLiveClientAdapterDelegate: AnyObject {
     func geminiLiveClientAdapter(_ client: GeminiLiveClientAdapter, didReceiveMessage message: ConversationItem)
     func geminiLiveClientAdapter(_ client: GeminiLiveClientAdapter, didEncounterError error: Error)
     func geminiLiveClientAdapter(_ client: GeminiLiveClientAdapter, didRequestToolExecution tool: String, args: [String: Any], callId: String)
+    func geminiLiveClientAdapter(_ client: GeminiLiveClientAdapter, didReceiveAudioLevel rms: Float)
 }
 
 /// Wrapper around the 'swift-gemini-api' library's GeminiLiveClient class.
@@ -193,6 +194,11 @@ final class GeminiLiveClientAdapter: NSObject {
                 let inputs = AVAudioSession.sharedInstance().currentRoute.inputs.map { $0.portType.rawValue }.joined(separator: ",")
                 print("🔇 Mic looks near-silent (RMS \(String(format: "%.1f", rms)), input: \(inputs))")
                 self.lastMicSilenceWarnAt = now
+            }
+            
+            // Report audio level for visualization
+            DispatchQueue.main.async {
+                self.delegate?.geminiLiveClientAdapter(self, didReceiveAudioLevel: rms)
             }
 
             self.client.sendAudio(base64: base64Audio)

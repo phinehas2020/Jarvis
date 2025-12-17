@@ -3491,6 +3491,10 @@ class WebRTCManager: NSObject, ObservableObject {
                     self?.connectionStatus = .disconnected
                 }
             }
+            
+            client.onAudioLevel = { [weak self] rms in
+                self?.waveformGenerator.updateWithRMS(rms)
+            }
 
             self.xaiClient = client
             print("   - Calling client.connect()...")
@@ -4318,6 +4322,10 @@ extension WebRTCManager: GeminiLiveClientAdapterDelegate {
         } else {
             print("⚠️ Unknown Gemini tool call: \(tool)")
         }
+    }
+    
+    func geminiLiveClientAdapter(_ client: GeminiLiveClientAdapter, didReceiveAudioLevel rms: Float) {
+        waveformGenerator.updateWithRMS(rms)
     }
     
     // MARK: - XAI Tool Handling

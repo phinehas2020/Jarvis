@@ -54,6 +54,7 @@ class XAILiveClient: NSObject {
     var onMessageReceived: ((_ role: String, _ text: String) -> Void)?
     var onToolCall: ((_ name: String, _ callId: String, _ arguments: String) -> Void)?
     var onError: ((Error) -> Void)?
+    var onAudioLevel: ((Float) -> Void)?
     
     // MARK: - Init
     
@@ -188,6 +189,11 @@ class XAILiveClient: NSObject {
                 print("🎤 XAI: Audio chunk #\(chunkCount) (\(base64.count) bytes, RMS: \(String(format: "%.1f", rms)))")
             } else if chunkCount % 50 == 0 {
                 print("🎤 XAI: Sending audio chunk #\(chunkCount) (RMS: \(String(format: "%.1f", rms)))")
+            }
+            
+            // Report audio level for visualization
+            DispatchQueue.main.async {
+                self.onAudioLevel?(rms)
             }
             
             // Send mic audio as input_audio_buffer.append
