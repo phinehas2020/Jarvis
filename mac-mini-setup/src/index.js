@@ -460,6 +460,10 @@ async function handleTool(name, args, context) {
             reaction: args.reaction
           })
         });
+
+        if (result.status === 500 && result.data?.message?.includes('Private API')) {
+          return { error: "This feature requires the BlueBubbles Private API. Please refer to PRIVATE_API_SETUP.md on your Mac Mini to enable it." };
+        }
         return result;
       }
 
@@ -471,6 +475,10 @@ async function handleTool(name, args, context) {
             displayName: args.displayName || args.name
           })
         });
+
+        if (result.status === 500 && result.data?.message?.includes('Private API')) {
+          return { error: "Renaming groups requires the BlueBubbles Private API. Please enable it in the BlueBubbles settings on your Mac Mini." };
+        }
         return result;
       }
 
@@ -479,6 +487,10 @@ async function handleTool(name, args, context) {
         const result = await bbFetch(`/api/v1/chat/${encodeURIComponent(args.chatGuid)}/read`, {
           method: 'POST'
         });
+
+        if (result.status === 500 && result.data?.message?.includes('Private API')) {
+          return { error: "Marking chats as read requires the BlueBubbles Private API. Please enable it in the BlueBubbles settings on your Mac Mini." };
+        }
         return result;
       }
 
