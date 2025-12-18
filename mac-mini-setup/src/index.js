@@ -239,7 +239,7 @@ const TOOLS = [
 
 let computerAgentBusy = false;
 
-async function handleTool(name, args) {
+async function handleTool(name, args, context) {
   console.log(`🔧 Executing tool: ${name}`, JSON.stringify(args));
 
   try {
@@ -376,7 +376,7 @@ async function handleTool(name, args) {
 
               // 2. Notify via iMessage if requested
               if (notifyPhone) {
-                await handleTool('send_imessage', { to: notifyPhone, message: msg });
+                await handleTool('send_imessage', { to: notifyPhone, message: msg }, context);
               }
             } catch (error) {
               console.error(`❌ Background task error:`, error);
@@ -390,7 +390,7 @@ async function handleTool(name, args) {
               }
 
               if (notifyPhone) {
-                await handleTool('send_imessage', { to: notifyPhone, message: `❌ Computer Agent Failed: ${error.message}` });
+                await handleTool('send_imessage', { to: notifyPhone, message: `❌ Computer Agent Failed: ${error.message}` }, context);
               }
             } finally {
               computerAgentBusy = false;
