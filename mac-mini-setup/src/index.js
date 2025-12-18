@@ -352,7 +352,13 @@ async function handleTool(name, args, context) {
         console.log(`📥 Pulling activity: ${chatLimit} chats, ${messagesPerChat} messages/chat`);
 
         // 1. Get recent chats sorted by last message
-        const chatsResult = await bbFetch(`/api/v1/chat?sort=lastmessage&limit=${chatLimit}`);
+        const chatsResult = await bbFetch('/api/v1/chat/query', {
+          method: 'POST',
+          body: JSON.stringify({
+            limit: chatLimit,
+            sort: 'lastmessage'
+          })
+        });
         if (chatsResult.status !== 200 || !chatsResult.data?.data) return chatsResult;
 
         const chats = chatsResult.data.data;
