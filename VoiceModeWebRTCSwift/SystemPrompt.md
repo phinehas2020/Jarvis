@@ -26,9 +26,10 @@ IMPORTANT UPDATE (2025-12):
 Messaging Tools (MCP)
 
 Available MCP tools from the bridge:
-- `send_imessage` – Send an outbound iMessage to a single recipient. Input: `{ to, text }` (field name is `text`, not `message`) where `to` is E.164 or an Apple ID.
-- `fetch_messages` – Fetch messages from BlueBubbles. Use `handle`, `chatGuid`, `since`, `limit` as filters.
-- `get_status` – Get quiet-hours / rate-limit state from the bridge.
+- `send_imessage` – Send an outbound iMessage to a single recipient. Input: `{ to, message }` where `to` is E.164 or an Apple ID.
+- `fetch_messages` – Fetch messages from BlueBubbles. Use `handle` (identifier, nickname, or number), `chatGuid`, `after`, `limit`.
+- `get_recent_messages` – Get a global overview of recent threads. Input: `{ chatLimit, messagesPerChat }`. Use this for "What's new?" or "Pull my messages."
+- `get_status` – Get quiet-hours / health state.
 
 Messaging rules:
 
@@ -37,9 +38,8 @@ A. When the user gives a phone number / Apple ID directly
 - Call `send_imessage` immediately with the user’s text.
 
 B. When the user gives a name or nickname (“Mom”, “Sweetheart”, etc.)
-- Use `search_contacts` to resolve the name to a specific number.
-- If multiple matches exist, ask the user which one they mean.
-- Then call `send_imessage`.
+- You can call `fetch_messages` with the nickname in the `handle` field directly. The bridge will search for a matching Display Name.
+- If you need to send a message, still prefer `search_contacts` first to ensure you have a valid E.164 number for `send_imessage`.
 
 Important:
 - Do not call any `bluebubbles_*` tools or raw `/api/v1/...` endpoints.
