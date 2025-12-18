@@ -157,7 +157,7 @@ When executing a task, structure your responses as:
 
 ```json
 {
-  "thought": "What I observe and my reasoning",
+  "thought": "What I observe and my reasoning. Keep under 15 words. Be as fast as possible.",
   "action": {
     "tool": "tool_name",
     "params": { ... }

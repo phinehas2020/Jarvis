@@ -337,6 +337,44 @@ async function handleTool(name, args, context) {
         return result;
       }
 
+      case 'send_tapback':
+      case 'bluebubbles_send_tapback': {
+        const result = await bbFetch('/api/v1/message/react', {
+          method: 'POST',
+          body: JSON.stringify({
+            chatGuid: args.chatGuid,
+            messageGuid: args.messageGuid,
+            reaction: args.reaction
+          })
+        });
+        return result;
+      }
+
+      case 'rename_group':
+      case 'bluebubbles_rename_chat': {
+        const result = await bbFetch(`/api/v1/chat/${encodeURIComponent(args.chatGuid)}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            displayName: args.displayName || args.name
+          })
+        });
+        return result;
+      }
+
+      case 'mark_chat_read':
+      case 'bluebubbles_mark_read': {
+        const result = await bbFetch(`/api/v1/chat/${encodeURIComponent(args.chatGuid)}/read`, {
+          method: 'POST'
+        });
+        return result;
+      }
+
+      case 'get_handles':
+      case 'bluebubbles_get_handles': {
+        const result = await bbFetch('/api/v1/handle');
+        return result;
+      }
+
       case 'execute_task': {
         const { task, maxSteps, background = false, notifyPhone } = args;
 

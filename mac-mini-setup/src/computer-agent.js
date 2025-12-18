@@ -105,6 +105,10 @@ const STEP_SCHEMA = {
             'browser_scroll',
             'browser_extract_text',
             'send_imessage',
+            'send_tapback',
+            'rename_group',
+            'mark_chat_read',
+            'get_handles',
             'done'
           ]
         },
@@ -275,6 +279,35 @@ async function executeToolAction(action) {
       }, action.bridgeContext);
     }
 
+    case 'send_tapback': {
+      if (!action.bridgeHandleTool) throw new Error('Tool only available via bridge');
+      return action.bridgeHandleTool('send_tapback', {
+        chatGuid: requireString(params.chatGuid, 'chatGuid'),
+        messageGuid: requireString(params.messageGuid, 'messageGuid'),
+        reaction: requireString(params.reaction, 'reaction')
+      }, action.bridgeContext);
+    }
+
+    case 'rename_group': {
+      if (!action.bridgeHandleTool) throw new Error('Tool only available via bridge');
+      return action.bridgeHandleTool('rename_group', {
+        chatGuid: requireString(params.chatGuid, 'chatGuid'),
+        displayName: requireString(params.displayName || params.name, 'displayName')
+      }, action.bridgeContext);
+    }
+
+    case 'mark_chat_read': {
+      if (!action.bridgeHandleTool) throw new Error('Tool only available via bridge');
+      return action.bridgeHandleTool('mark_chat_read', {
+        chatGuid: requireString(params.chatGuid, 'chatGuid')
+      }, action.bridgeContext);
+    }
+
+    case 'get_handles': {
+      if (!action.bridgeHandleTool) throw new Error('Tool only available via bridge');
+      return action.bridgeHandleTool('get_handles', {}, action.bridgeContext);
+    }
+
     default:
       throw new Error(`Unknown tool: ${tool}`);
   }
@@ -344,8 +377,8 @@ export async function runComputerAgent(options, bridgeContext) {
   const {
     task,
     maxSteps = Number(process.env.COMPUTER_AGENT_MAX_STEPS || 20),
-    model = process.env.COMPUTER_AGENT_MODEL || 'grok-4.1-fast',
-    imageDetail = process.env.COMPUTER_AGENT_IMAGE_DETAIL || 'high',
+    model = process.env.COMPUTER_AGENT_MODEL || 'grok-4-1-fast-non-reasoning',
+    imageDetail = process.env.COMPUTER_AGENT_IMAGE_DETAIL || 'low',
     postActionWaitMs = Number(process.env.COMPUTER_AGENT_POST_ACTION_WAIT_MS || 300),
     includeFinalScreenshot = true,
     handleTool: bridgeHandleTool // Callback from the bridge
