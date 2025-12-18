@@ -346,35 +346,52 @@ async function handleTool(name, args, context) {
       }
 
       case 'get_recent_messages': {
-        const chatLimit = args.chatLimit || 5;
-        const messagesPerChat = args.messagesPerChat || 2;
+        const msgLimit = args.messageLimit || 20;
 
-        console.log(`📥 Pulling activity: ${chatLimit} chats, ${messagesPerChat} messages/chat`);
+        console.log(`📥 Pulling global activity: latest ${msgLimit} messages`);
 
-        // 1. Get recent chats sorted by last message
-        const chatsResult = await bbFetch('/api/v1/chat/query', {
+        // 1. Get recent messages globally with chat info
+        const msgResult = await bbFetch('/api/v1/message/query', {
           method: 'POST',
           body: JSON.stringify({
-            limit: chatLimit,
-            sort: 'lastmessage'
+            limit: msgLimit,
+            with: ['chat', 'handle'],
+            sort: 'DESC'
           })
         });
-        if (chatsResult.status !== 200 || !chatsResult.data?.data) return chatsResult;
 
-        const chats = chatsResult.data.data;
-        const result = [];
+        if (msgResult.status !== 200 || !msgResult.data?.data) return msgResult;
 
-        // 2. For each chat, get the latest N messages
-        for (const chat of chats) {
-          const msgResult = await bbFetch(`/api/v1/chat/${encodeURIComponent(chat.guid)}/message?limit=${messagesPerChat}&sort=DESC`);
-          result.push({
-            chatName: chat.displayName || chat.title || 'Unknown Chat',
-            chatGuid: chat.guid,
-            messages: msgResult.status === 200 ? msgResult.data?.data : []
-          });
+        const messages = msgResult.data.data;
+        const chatMap = new Map();
+
+        // 2. Group messages by chat
+        for (const msg of messages) {
+          const chats = msg.chats || [];
+          if (chats.length === 0) continue;
+
+          const chat = chats[0];
+          if (!chatMap.has(chat.guid)) {
+            chatMap.set(chat.guid, {
+              chatName: chat.displayName || chat.title || 'Unknown Chat',
+              chatGuid: chat.guid,
+              messages: []
+            });
+          }
+
+          const entry = chatMap.get(chat.guid);
+          if (entry.messages.length < (args.messagesPerChat || 2)) {
+            entry.messages.push({
+              guid: msg.guid,
+              text: msg.text,
+              dateCreated: msg.dateCreated,
+              isFromMe: msg.isFromMe,
+              handle: msg.handle?.address
+            });
+          }
         }
 
-        return { success: true, activity: result };
+        return { success: true, activity: Array.from(chatMap.values()) };
       }
 
       case 'send_imessage':
