@@ -1,39 +1,44 @@
-# Repository Guidelines
+# Jarvis - Capabilities & Tools Guide
 
-## Project Structure & Module Organization
-- `VoiceModeWebRTCSwift/` contains the SwiftUI app. Key files: `ContentView.swift` (conversation UI), `WebRTCManager.swift` (Realtime/WebRTC engine), and `SystemPrompt.md` (default system messaging). Assets and previews live in `Assets.xcassets/` and `Preview Content/`.
-- `VoiceModeWebRTCSwift.xcodeproj/` and `Jarvis with MCP.xcodeproj/` store Xcode project settings. Use the SwiftUI target `VoiceModeWebRTCSwiftApp` for runtime changes.
+This guide describes what Jarvis can do and the tools it uses to interact with your world.
 
-## Build, Test, and Development Commands
-- `open VoiceModeWebRTCSwift.xcodeproj` launches the project in Xcode for iterative development.
-- `xcodebuild -scheme VoiceModeWebRTCSwift -destination 'platform=iOS Simulator,name=iPhone 15' build` performs a CI-friendly build.
-- `xcodebuild -scheme VoiceModeWebRTCSwift -destination 'platform=iOS Simulator,name=iPhone 15' test` runs XCTest targets when present.
-- `swift package update` refreshes Swift Package Manager dependencies if WebRTC or other packages are bumped.
+## 🛠️ Native iOS Tools
+These tools run directly on your iPhone.
 
-## Coding Style & Naming Conventions
-- Swift source uses 4-space indentation and `lowerCamelCase` for properties/functions, `UpperCamelCase` for types.
-- Prefer SwiftUI modifiers in logical blocks and keep view structs small—extract helper views under `VoiceModeWebRTCSwift/` as needed.
-- Maintain `SystemPrompt.md` content in Markdown; keep prompts concise and version changes in commits.
-- Run `xcodebuild -scheme VoiceModeWebRTCSwift build` before pushing to catch obvious lint or compile issues (SwiftLint is not currently configured).
+| Tool | Description |
+| :--- | :--- |
+| `get_brightness` / `set_brightness` | Adjust screen brightness. |
+| `get_volume` / `set_volume` | Adjust system volume. |
+| `play_music` | Play songs, albums, or playlists. |
+| `get_calendar_events` | Check your schedule for today or tomorrow. |
+| `create_reminder` | Add items to your Reminders app. |
+| `capture_photo` | Take a photo with the camera. |
+| `screen_shot` | Capture your iPhone's current screen. |
 
-## Testing Guidelines
-- Add unit/UI tests under a `VoiceModeWebRTCSwiftTests/` target mirroring the source tree. Name files `<Feature>Tests.swift` and use descriptive `testShould...` methods.
-- Favor dependency injection for `WebRTCManager` so audio/network behaviors can be mocked.
-- Ensure new features include basic simulator coverage; attach simulator logs for regressions affecting AV or signaling.
+## 🖥️ Mac Mini Bridge Tools (BlueBubbles)
+These tools require the Mac Mini bridge to be online.
 
-## Commit & Pull Request Guidelines
-- Follow the existing history: concise, present-tense summaries (e.g., `Add microphone access to Info.plist`).
-- Group related Swift/UI updates into a single commit with a clear scope; include API key handling updates separately.
-- PRs should list testing steps (build target, simulator/device), reference related issues, and add screenshots/GIFs for UI-affecting changes.
-- Note any API key handling changes or new configuration requirements in the PR body to aid reviewers.
+### iMessage Management
+- **`send_imessage`**: Send clear, native iMessages. Use this for sending files or links.
+- **`send_tapback`**: React to messages with Love, Like, Dislike, Laugh, or Emphasize.
+- **`rename_group`**: Instantly change the name of any group chat.
+- **`mark_chat_read`**: Clear your notifications by marking chats as read.
+- **`fetch_messages`**: Search through your message history.
 
-## Configuration & Security Tips
-- Never commit real API keys; keep placeholders like `let API_KEY = "your_openai_api_key"` and rely on runtime input in `OptionsView`.
-- Document new configurable values in `README.md` and, if persistent storage is added, mention reset steps for contributors.
+### Desktop Automation (The Computer Agent)
+- **`execute_task`**: Jarvis's most powerful tool. You can ask him to:
+  - "Organize my Downloads folder."
+  - "Find that email about the flight and save it to a PDF."
+  - "Check the price of Bitcoin every 5 minutes and text me if it drops."
+  
+> [!IMPORTANT]
+> When `background: true` is set, Jarvis will perform the task silently and send you a notification (and an iMessage) when completed.
 
-## iMessage Bridge (BlueBubbles MCP)
-- A dedicated Mac mini runs the BlueBubbles bridge plus a local MCP WebSocket server (`imessage-bridge`).  
-- The bridge listens on `ws://<MacMiniLANIP>:9797/mcp` with bearer auth (`MCP_BEARER`). Set `MCP_HOST`, `MCP_PORT`, and `MCP_BEARER` in `/opt/imessage-bridge/.env` and restart via `pm2 restart imessage-bridge --update-env`.
-- Tools exposed: `send_imessage`, `fetch_messages`, and `get_status`. All iMessage actions must use these; the Zapier tool is only kept for legacy reference.
-- Test locally with `npm run test:mcp` (requires `MCP_TEST_BEARER`). The script attempts a send (expected to fail for the dummy number) and verifies message fetch.
-- When configuring the iOS client, add a custom MCP server with the LAN URL and bearer token; the system prompt already instructs Jarvis to prefer this path.
+## 🧠 System Prompt
+The "brain" of Jarvis lives in `VoiceModeWebRTCSwift/SystemPrompt.md`. This file tells Jarvis how to behave, what tone to use, and when to suggest background tasks.
+
+## 🚀 Speed Secrets
+For the best experience, Jarvis is configured by default with:
+- `grok-4-1-fast-non-reasoning`: To ensure sub-second response times.
+- `low` image detail: To speed up screen analysis.
+- Concise thought patterns: To reduce audio latency.

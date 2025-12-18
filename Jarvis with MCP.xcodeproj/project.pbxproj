@@ -9,13 +9,59 @@
 /* Begin PBXBuildFile section */
 		8CDC395F2D29034E008A13BF /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 8CDC395E2D29034E008A13BF /* WebRTC */; };
 		D04BF6622EF1E05A00DF51BC /* swift-gemini-api in Frameworks */ = {isa = PBXBuildFile; productRef = D04BF6612EF1E05A00DF51BC /* swift-gemini-api */; };
+		D066260D2EF4AF7100D195F0 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D066260C2EF4AF7000D195F0 /* WidgetKit.framework */; };
+		D066260F2EF4AF7100D195F0 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D066260E2EF4AF7100D195F0 /* SwiftUI.framework */; };
+		D06626202EF4AF7200D195F0 /* JarvisWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D066260A2EF4AF7000D195F0 /* JarvisWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D066261E2EF4AF7200D195F0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8CDC39412D29030B008A13BF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D06626092EF4AF7000D195F0;
+			remoteInfo = JarvisWidgetsExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D06626212EF4AF7200D195F0 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				D06626202EF4AF7200D195F0 /* JarvisWidgetsExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		8CDC39492D29030B008A13BF /* VoiceModeWebRTCSwift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VoiceModeWebRTCSwift.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D066260A2EF4AF7000D195F0 /* JarvisWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = JarvisWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		D066260C2EF4AF7000D195F0 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		D066260E2EF4AF7100D195F0 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D06626252EF4AF7200D195F0 /* Exceptions for "JarvisWidgets" folder in "JarvisWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = D06626092EF4AF7000D195F0 /* JarvisWidgetsExtension */;
+		};
+		D066262B2EF4B14300D195F0 /* Exceptions for "VoiceModeWebRTCSwift" folder in "JarvisWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				JarvisActivityAttributes.swift,
+				StartJarvisIntent.swift,
+				ToggleMuteIntent.swift,
+			);
+			target = D06626092EF4AF7000D195F0 /* JarvisWidgetsExtension */;
+		};
 		D0E906A42E662E6100999E82 /* Exceptions for "VoiceModeWebRTCSwift" folder in "VoiceModeWebRTCSwift" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -30,8 +76,17 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				D0E906A42E662E6100999E82 /* Exceptions for "VoiceModeWebRTCSwift" folder in "VoiceModeWebRTCSwift" target */,
+				D066262B2EF4B14300D195F0 /* Exceptions for "VoiceModeWebRTCSwift" folder in "JarvisWidgetsExtension" target */,
 			);
 			path = VoiceModeWebRTCSwift;
+			sourceTree = "<group>";
+		};
+		D06626102EF4AF7100D195F0 /* JarvisWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D06626252EF4AF7200D195F0 /* Exceptions for "JarvisWidgets" folder in "JarvisWidgetsExtension" target */,
+			);
+			path = JarvisWidgets;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -46,6 +101,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D06626072EF4AF7000D195F0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D066260F2EF4AF7100D195F0 /* SwiftUI.framework in Frameworks */,
+				D066260D2EF4AF7100D195F0 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -53,6 +117,8 @@
 			isa = PBXGroup;
 			children = (
 				8CDC394B2D29030B008A13BF /* VoiceModeWebRTCSwift */,
+				D06626102EF4AF7100D195F0 /* JarvisWidgets */,
+				D066260B2EF4AF7000D195F0 /* Frameworks */,
 				8CDC394A2D29030B008A13BF /* Products */,
 			);
 			sourceTree = "<group>";
@@ -61,8 +127,18 @@
 			isa = PBXGroup;
 			children = (
 				8CDC39492D29030B008A13BF /* VoiceModeWebRTCSwift.app */,
+				D066260A2EF4AF7000D195F0 /* JarvisWidgetsExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		D066260B2EF4AF7000D195F0 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				D066260C2EF4AF7000D195F0 /* WidgetKit.framework */,
+				D066260E2EF4AF7100D195F0 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -75,10 +151,12 @@
 				8CDC39452D29030B008A13BF /* Sources */,
 				8CDC39462D29030B008A13BF /* Frameworks */,
 				8CDC39472D29030B008A13BF /* Resources */,
+				D06626212EF4AF7200D195F0 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				D066261F2EF4AF7200D195F0 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				8CDC394B2D29030B008A13BF /* VoiceModeWebRTCSwift */,
@@ -92,6 +170,28 @@
 			productReference = 8CDC39492D29030B008A13BF /* VoiceModeWebRTCSwift.app */;
 			productType = "com.apple.product-type.application";
 		};
+		D06626092EF4AF7000D195F0 /* JarvisWidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D06626242EF4AF7200D195F0 /* Build configuration list for PBXNativeTarget "JarvisWidgetsExtension" */;
+			buildPhases = (
+				D06626062EF4AF7000D195F0 /* Sources */,
+				D06626072EF4AF7000D195F0 /* Frameworks */,
+				D06626082EF4AF7000D195F0 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				D06626102EF4AF7100D195F0 /* JarvisWidgets */,
+			);
+			name = JarvisWidgetsExtension;
+			packageProductDependencies = (
+			);
+			productName = JarvisWidgetsExtension;
+			productReference = D066260A2EF4AF7000D195F0 /* JarvisWidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -99,11 +199,14 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1620;
+				LastSwiftUpdateCheck = 2610;
 				LastUpgradeCheck = 2610;
 				TargetAttributes = {
 					8CDC39482D29030B008A13BF = {
 						CreatedOnToolsVersion = 16.2;
+					};
+					D06626092EF4AF7000D195F0 = {
+						CreatedOnToolsVersion = 26.1.1;
 					};
 				};
 			};
@@ -126,12 +229,20 @@
 			projectRoot = "";
 			targets = (
 				8CDC39482D29030B008A13BF /* VoiceModeWebRTCSwift */,
+				D06626092EF4AF7000D195F0 /* JarvisWidgetsExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		8CDC39472D29030B008A13BF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D06626082EF4AF7000D195F0 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -148,7 +259,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D06626062EF4AF7000D195F0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D066261F2EF4AF7200D195F0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D06626092EF4AF7000D195F0 /* JarvisWidgetsExtension */;
+			targetProxy = D066261E2EF4AF7200D195F0 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		8CDC39552D29030C008A13BF /* Debug */ = {
@@ -348,6 +474,66 @@
 			};
 			name = Release;
 		};
+		D06626222EF4AF7200D195F0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = JarvisWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = JarvisWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = sampleApp.VoiceModeWebRTCSwift.JarvisWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D06626232EF4AF7200D195F0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = JarvisWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = JarvisWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = sampleApp.VoiceModeWebRTCSwift.JarvisWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -365,6 +551,15 @@
 			buildConfigurations = (
 				8CDC39582D29030C008A13BF /* Debug */,
 				8CDC39592D29030C008A13BF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D06626242EF4AF7200D195F0 /* Build configuration list for PBXNativeTarget "JarvisWidgetsExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D06626222EF4AF7200D195F0 /* Debug */,
+				D06626232EF4AF7200D195F0 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -123,7 +123,7 @@ struct ContentView: View {
             For long‑form or token‑heavy writing:
             
             Call delegate_to_gpt4o with the exact prompt you want answered (include any style/system hints you need).
-            This uses a higher‑power model (gpt-5-2025-08-07 by default) without spending realtime tokens.
+            This uses a high-performance model (grok-4-1-fast-non-reasoning by default) for high-quality text generation without spending realtime tokens.
             Use the returned text to brief the user, summarize, or adapt, instead of generating the entire long response in the realtime session.
             Examples
             “Set brightness to 50%” → Use set_brightness.
@@ -221,8 +221,21 @@ struct ContentView: View {
     private let bluebubblesToolNames = [
         "send_imessage",
         "fetch_messages",
+        "get_recent_messages",
+        "send_tapback",
+        "rename_group",
+        "mark_chat_read",
+        "get_handles",
+        "execute_task",
         "get_status"
     ]
+    
+    // MARK: - Design System
+    private let jarvisPurple = Color(red: 0.5, green: 0.3, blue: 0.9)
+    private let jarvisBlue = Color(red: 0.1, green: 0.4, blue: 0.9)
+    private let jarvisGreen = Color(red: 0.2, green: 0.8, blue: 0.5)
+    private let glassBackground = Color.primary.opacity(0.05)
+    private let cornerRadius: CGFloat = 16
     
     // Check if current model supports vision
     private var currentModelSupportsVision: Bool {
@@ -237,10 +250,9 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                VStack(spacing: 12) {
+                VStack(spacing: 20) {
                     HeaderView()
                     ConnectionControls()
-                    Divider().padding(.vertical, 6)
                     
                     ConversationView()
                     
@@ -366,217 +378,195 @@ struct ContentView: View {
     
     @ViewBuilder
     private func HeaderView() -> some View {
-        VStack(spacing: 2) {
-            Text("Jarvis with MCP")
-                .font(.system(size: 24, weight: .bold))
-                .padding(.top, 12)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Jarvis")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                HStack(spacing: 6) {
+                    Circle()
+                        .frame(width: 8, height: 8)
+                        .foregroundColor(webrtcManager.connectionStatus.color)
+                        .shadow(color: webrtcManager.connectionStatus.color.opacity(0.5), radius: 4)
+                    Text(webrtcManager.connectionStatus.description)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Spacer()
+            
+            Button {
+                showOptionsSheet.toggle()
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(.secondary)
+                    .padding(10)
+                    .background(glassBackground)
+                    .clipShape(Circle())
+            }
         }
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
     }
     
     @ViewBuilder
     private func ConnectionControls() -> some View {
-        VStack(spacing: 12) {
-            // Top Row: Status and Main Connection Button
-            HStack {
-                // Connection status indicator
-                Circle()
-                    .frame(width: 12, height: 12)
-                    .foregroundColor(webrtcManager.connectionStatus.color)
-                Text(webrtcManager.connectionStatus.description)
-                    .foregroundColor(webrtcManager.connectionStatus.color)
-                    .contentTransition(.numericText())
-                    .animation(.easeInOut(duration: 0.3), value: webrtcManager.connectionStatus)
-                    .onChange(of: webrtcManager.connectionStatus) { _ in
-                        switch webrtcManager.connectionStatus {
-                        case .connecting:
-                            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-                        case .connected:
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        case .disconnected:
-                            webrtcManager.eventTypeStr = ""
-                            webrtcManager.waveformGenerator.reset()
-                        }
+        VStack(spacing: 16) {
+            if webrtcManager.connectionStatus == .connected {
+                HStack(spacing: 12) {
+                    // Media Control Group
+                    HStack(spacing: 0) {
+                        MediaControlButton(
+                            icon: webrtcManager.isMicMuted ? "mic.slash.fill" : "mic.fill",
+                            label: "Mic",
+                            color: webrtcManager.isMicMuted ? .red : jarvisBlue,
+                            action: webrtcManager.toggleMute
+                        )
+                        
+                        Divider().frame(height: 24).padding(.horizontal, 8)
+                        
+                        MediaControlButton(
+                            icon: "speaker.wave.3.fill",
+                            label: "Speaker",
+                            color: .orange,
+                            action: webrtcManager.forceAudioToSpeaker
+                        )
+                        
+                        Divider().frame(height: 24).padding(.horizontal, 8)
+                        
+                        MediaControlButton(
+                            icon: webrtcManager.isVideoEnabled ? "video.fill" : "video.slash.fill",
+                            label: "Video",
+                            color: currentModelSupportsVision ? (webrtcManager.isVideoEnabled ? jarvisPurple : .secondary) : .gray.opacity(0.5),
+                            action: webrtcManager.toggleVideo
+                        )
                     }
-                
-                // Audio Waveform Visualization (shown when connected)
-                if webrtcManager.connectionStatus == .connected {
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(glassBackground)
+                    .cornerRadius(12)
+                    
+                    Spacer()
+                    
+                    // Waveform
                     WaveformView(
                         amplitudes: webrtcManager.waveformGenerator.amplitudes,
                         isActive: !webrtcManager.isMicMuted,
-                        accentColor: webrtcManager.isMicMuted ? .red : .blue
+                        accentColor: webrtcManager.isMicMuted ? .red : jarvisBlue,
+                        barCount: 10
                     )
-                    .frame(width: 80, height: 24)
-                    .transition(.scale.combined(with: .opacity))
-                }
-                
-                Spacer()
-                
-                // Main Connection Button
-                if webrtcManager.connectionStatus == .connected {
-                    Button("Stop Connection") {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        webrtcManager.stopConnection()
-                    }
-                    .buttonStyle(.borderedProminent)
-                } else {
-                    Button(isRealtimeModel ? "Start Realtime Connection" : "Start Chat Connection") {
-                        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-                        webrtcManager.connectionStatus = .connecting
-                        
-                        if isRealtimeModel {
-                            // Use WebRTC realtime connection for realtime models
-                            // Clear any previous MCP tools and configure available servers
-                            webrtcManager.clearMCPTools()
-                            
-                            // Add custom MCP server if configured
-                            if customMcpEnabled && !customMcpServerUrl.isEmpty && !customMcpServerLabel.isEmpty {
-                                let safeLabel = sanitizedServerLabel(customMcpServerLabel)
-                                webrtcManager.addMCPTool(
-                                    serverLabel: safeLabel,
-                                    serverUrl: customMcpServerUrl,
-                                    authorization: customMcpAuthToken.isEmpty ? nil : customMcpAuthToken,
-                                    requireApproval: "never",
-                                    expectedToolNames: bluebubblesToolNames
-                                )
-                                print("🔧 Added custom MCP server: \(safeLabel)")
-                            }
-                            
-                            print("🚀 Starting realtime connection with MCP tools and contact search")
-                            
-                            webrtcManager.startConnection(
-                                apiKey: apiKey,
-                                provider: selectedProvider,
-                                modelName: selectedModel,
-                                systemMessage: systemMessage,
-                                voice: selectedVoice,
-                                geminiApiKey: geminiApiKey,
-                                geminiModel: geminiModel,
-                                geminiLiveEndpoint: geminiLiveEndpoint,
-                                xaiApiKey: xaiApiKey
-                            )
-                        } else {
-                            // For non-realtime models, show a message that they're not supported yet
-                            print("⚠️ Non-realtime models not yet implemented")
-                            webrtcManager.connectionStatus = .disconnected
-                            
-                            // Show alert or message to user
-                            DispatchQueue.main.async {
-                                // You could show an alert here
-                                print("❌ The selected model (\(selectedModel)) is not yet supported. Please use a realtime model (gpt-realtime) for now.")
-                            }
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(webrtcManager.connectionStatus == .connecting)
-                }
-                
-                // Settings button
-                Button {
-                    showOptionsSheet.toggle()
-                } label: {
-                    Image(systemName: "gearshape.fill")
-                        .font(.system(size: 16))
-                }
-                .buttonStyle(.bordered)
-            }
-            
-            // Bottom Row: Control Buttons (only when connected) - separate row to prevent squishing
-            if webrtcManager.connectionStatus == .connected {
-                HStack(spacing: 8) {
-                    // Mute button
-                    Button(action: {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        webrtcManager.toggleMute()
-                    }) {
-                        VStack(spacing: 2) {
-                            Image(systemName: webrtcManager.isMicMuted ? "mic.slash.fill" : "mic.fill")
-                                .foregroundColor(webrtcManager.isMicMuted ? .red : .primary)
-                                .font(.system(size: 14))
-                            Text("Mic")
-                                .font(.system(size: 8))
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel(webrtcManager.isMicMuted ? "Unmute" : "Mute")
-                    
-                    // Speaker button
-                    Button(action: {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        webrtcManager.forceAudioToSpeaker()
-                    }) {
-                        VStack(spacing: 2) {
-                            Image(systemName: "speaker.wave.3.fill")
-                                .foregroundColor(.orange)
-                                .font(.system(size: 14))
-                            Text("Speaker")
-                                .font(.system(size: 8))
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Force to Main Speaker")
-                    
-                    // Video button
-                    Button(action: {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        webrtcManager.toggleVideo()
-                    }) {
-                        VStack(spacing: 2) {
-                            Image(systemName: webrtcManager.isVideoEnabled ? "video.fill" : "video.slash.fill")
-                                .foregroundColor(currentModelSupportsVision ? (webrtcManager.isVideoEnabled ? .blue : .primary) : .gray)
-                                .font(.system(size: 14))
-                            Text("Video")
-                                .font(.system(size: 8))
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel(currentModelSupportsVision ? (webrtcManager.isVideoEnabled ? "Disable video" : "Enable video") : "Video not supported by this model")
-                    if webrtcManager.isVideoEnabled && currentModelSupportsVision {
-                        Button(action: {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            webrtcManager.toggleCamera()
-                        }) {
-                            VStack(spacing: 2) {
-                                Image(systemName: webrtcManager.isCameraOn ? "eye.fill" : "eye.slash.fill")
-                                    .foregroundColor(webrtcManager.isCameraOn ? .green : .red)
-                                    .font(.system(size: 14))
-                                Text("Camera")
-                                    .font(.system(size: 8))
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel(webrtcManager.isCameraOn ? "Turn camera off" : "Turn camera on")
-                    }
-                    
-                    // Camera rotate button (only when video enabled AND camera is on AND vision is supported)
-                    if webrtcManager.isVideoEnabled && webrtcManager.isCameraOn && currentModelSupportsVision {
-                        Button(action: {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            webrtcManager.switchCamera()
-                        }) {
-                            VStack(spacing: 2) {
-                                Image(systemName: "camera.rotate.fill")
-                                    .foregroundColor(.purple)
-                                    .font(.system(size: 14))
-                                Text("Rotate")
-                                    .font(.system(size: 8))
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel("Switch to \(webrtcManager.isUsingFrontCamera ? "Back" : "Front") Camera")
-                    }
+                    .frame(width: 60, height: 32)
                     
                     Spacer()
+                    
+                    // Stop Button
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        webrtcManager.stopConnection()
+                    }) {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.red)
+                            .clipShape(Circle())
+                            .shadow(color: Color.red.opacity(0.3), radius: 8, x: 0, y: 4)
+                    }
                 }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            } else {
+                // Start Connection Button
+                Button(action: {
+                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                    startConnectionFlow()
+                }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "sparkles")
+                        Text(isRealtimeModel ? "Start Jarvis" : "Chat with Jarvis")
+                            .fontWeight(.bold)
+                    }
+                    .font(.system(size: 18))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 56)
+                    .background(
+                        LinearGradient(
+                            colors: [jarvisBlue, jarvisPurple],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(16)
+                    .shadow(color: jarvisBlue.opacity(0.3), radius: 10, x: 0, y: 5)
+                }
+                .disabled(webrtcManager.connectionStatus == .connecting)
+                .opacity(webrtcManager.connectionStatus == .connecting ? 0.6 : 1.0)
+                .overlay(
+                    Group {
+                        if webrtcManager.connectionStatus == .connecting {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                    }
+                )
             }
         }
-        .padding(.horizontal)
+        .padding(.horizontal, 20)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: webrtcManager.connectionStatus)
+    }
+    
+    @ViewBuilder
+    private func MediaControlButton(icon: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        }) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 18))
+                    .foregroundColor(color)
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            .frame(width: 48)
+        }
+    }
+    
+    private func startConnectionFlow() {
+        webrtcManager.connectionStatus = .connecting
+        
+        if isRealtimeModel {
+            webrtcManager.clearMCPTools()
+            
+            if customMcpEnabled && !customMcpServerUrl.isEmpty && !customMcpServerLabel.isEmpty {
+                let safeLabel = sanitizedServerLabel(customMcpServerLabel)
+                webrtcManager.addMCPTool(
+                    serverLabel: safeLabel,
+                    serverUrl: customMcpServerUrl,
+                    authorization: customMcpAuthToken.isEmpty ? nil : customMcpAuthToken,
+                    requireApproval: "never",
+                    expectedToolNames: bluebubblesToolNames
+                )
+            }
+            
+            webrtcManager.startConnection(
+                apiKey: apiKey,
+                provider: selectedProvider,
+                modelName: selectedModel,
+                systemMessage: systemMessage,
+                voice: selectedVoice,
+                geminiApiKey: geminiApiKey,
+                geminiModel: geminiModel,
+                geminiLiveEndpoint: geminiLiveEndpoint,
+                xaiApiKey: xaiApiKey
+            )
+        } else {
+            print("⚠️ Non-realtime models not yet implemented")
+            webrtcManager.connectionStatus = .disconnected
+        }
     }
     
     // MARK: - Conversation View
@@ -585,86 +575,149 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Conversation")
-                    .font(.headline)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.secondary)
                 Spacer()
-                Text(webrtcManager.eventTypeStr)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                    .padding(.leading, 16)
+                if !webrtcManager.eventTypeStr.isEmpty {
+                    Text(webrtcManager.eventTypeStr)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(jarvisBlue.opacity(0.1))
+                        .foregroundColor(jarvisBlue)
+                        .cornerRadius(4)
+                }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 8)
             
             if showTextOutput {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(webrtcManager.conversation.filter { $0.role == "user" || $0.role == "assistant" }) { msg in
-                            MessageRow(msg: msg)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            ForEach(webrtcManager.conversation.filter { $0.role == "user" || $0.role == "assistant" }) { msg in
+                                MessageBubble(msg: msg)
+                                    .id(msg.id)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .padding(.bottom, 20)
+                    }
+                    .onChange(of: webrtcManager.conversation.count) { _ in
+                        if let lastId = webrtcManager.conversation.last?.id {
+                            withAnimation {
+                                proxy.scrollTo(lastId, anchor: .bottom)
+                            }
                         }
                     }
-                    .padding()
                 }
             } else {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        VStack(spacing: 8) {
-                            Image(systemName: "speaker.wave.3.fill")
-                                .font(.system(size: 40))
-                                .foregroundColor(.blue)
-                            Text("Audio Only Mode")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            Text("Text output is disabled to save costs")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        Spacer()
-                    }
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                AudioOnlyPlaceholder()
             }
+        }
+    }
+    
+    @ViewBuilder
+    private func AudioOnlyPlaceholder() -> some View {
+        VStack {
+            Spacer()
+            VStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(jarvisBlue.opacity(0.1))
+                        .frame(width: 80, height: 80)
+                    Image(systemName: "waveform")
+                        .font(.system(size: 30))
+                        .foregroundColor(jarvisBlue)
+                }
+                
+                VStack(spacing: 4) {
+                    Text("Audio Only Mode")
+                        .font(.headline)
+                    Text("Text output is disabled in settings")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            Spacer()
         }
     }
     
     // MARK: - Message Row
     @ViewBuilder
-    private func MessageRow(msg: ConversationItem) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: msg.roleSymbol)
-                .foregroundColor(msg.roleColor)
-                .padding(.top, 4)
-            Text(msg.text.trimmingCharacters(in: .whitespacesAndNewlines))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentTransition(.numericText())
-                .animation(.easeInOut(duration: 0.1), value: msg.text)
+    private func MessageBubble(msg: ConversationItem) -> some View {
+        let isUser = msg.role.lowercased() == "user"
+        
+        HStack {
+            if isUser { Spacer() }
+            
+            VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    if !isUser {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 12))
+                            .foregroundColor(jarvisPurple)
+                    }
+                    Text(isUser ? "You" : "Jarvis")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.secondary)
+                    if isUser {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(jarvisBlue)
+                    }
+                }
+                .padding(.horizontal, 4)
+                
+                Text(msg.text.trimmingCharacters(in: .whitespacesAndNewlines))
+                    .font(.system(size: 16))
+                    .foregroundColor(isUser ? .white : .primary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        isUser ? 
+                        LinearGradient(colors: [jarvisBlue, jarvisBlue.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing) :
+                        LinearGradient(colors: [glassBackground, glassBackground.opacity(0.5)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .cornerRadius(18, corners: isUser ? [.topLeft, .bottomLeft, .bottomRight] : [.topRight, .bottomLeft, .bottomRight])
+                    .shadow(color: isUser ? jarvisBlue.opacity(0.2) : Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+            }
+            .frame(maxWidth: 300, alignment: isUser ? .trailing : .leading)
+            
+            if !isUser { Spacer() }
         }
         .contextMenu {
             Button("Copy") {
                 UIPasteboard.general.string = msg.text
             }
         }
-        .padding(.bottom, msg.role == "assistant" ? 24 : 8)
     }
     
     // MARK: - Message Input
     @ViewBuilder
     private func MessageInputView() -> some View {
-        HStack {
-            TextField("Insert message...", text: $webrtcManager.outgoingMessage, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
+        HStack(spacing: 12) {
+            TextField("Message Jarvis...", text: $webrtcManager.outgoingMessage, axis: .vertical)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(glassBackground)
+                .cornerRadius(20)
                 .focused($isTextFieldFocused)
-            Button("Send") {
+            
+            Button(action: {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 webrtcManager.sendMessage()
                 isTextFieldFocused = false
+            }) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 32))
+                    .foregroundColor(webrtcManager.connectionStatus == .connected ? jarvisBlue : .secondary)
             }
-            .disabled(webrtcManager.connectionStatus != .connected)
-            .buttonStyle(.bordered)
+            .disabled(webrtcManager.connectionStatus != .connected || webrtcManager.outgoingMessage.trimmingCharacters(in: .whitespaces).isEmpty)
         }
-        .padding([.horizontal, .bottom])
+        .padding(.horizontal, 20)
+        .padding(.bottom, 12)
     }
 }
 
@@ -999,6 +1052,24 @@ struct VideoPreviewView: UIViewRepresentable {
 }
 
 // MARK: - Preview
+
+// MARK: - Helper Extensions
+
+struct RoundedCorner: Shape {
+    var radius: CGFloat = .infinity
+    var corners: UIRectCorner = .allCorners
+
+    func path(in rect: CGRect) -> Path {
+        let path = UIBezierPath(roundedRect: rect, byRoundingCorners: corners, cornerRadii: CGSize(width: radius, height: radius))
+        return Path(path.cgPath)
+    }
+}
+
+extension View {
+    func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
+        clipShape(RoundedCorner(radius: radius, corners: corners))
+    }
+}
 
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {

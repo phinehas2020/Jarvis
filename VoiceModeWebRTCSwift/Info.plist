@@ -30,5 +30,7 @@
 	<string>Jarvis needs notification access to help manage alarms and reminders.</string>
 	<key>NSIntentsUsageDescription</key>
 	<string>Jarvis needs access to run iOS Shortcuts and integrate with system features.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 </dict>
 </plist>

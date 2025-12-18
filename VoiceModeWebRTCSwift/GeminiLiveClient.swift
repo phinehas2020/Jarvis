@@ -92,6 +92,10 @@ final class GeminiLiveClientAdapter: NSObject {
     private let speechController = GeminiSpeechController()
     private var lastMicLevelLogAt: Date = .distantPast
     private var lastMicSilenceWarnAt: Date = .distantPast
+    private var suppressMicUntil: Date = .distantPast
+    private let micSuppressionWindow: TimeInterval = 2.0
+    
+    var isMuted: Bool = false
     
     // Track connection status locally
     private var _isConnected: Bool = false
@@ -108,10 +112,11 @@ final class GeminiLiveClientAdapter: NSObject {
             version: "v1beta",  // Use v1beta instead of v1alpha for better compatibility
             voice: .PUCK,
             onSetupComplete: nil,
-            verbose: true,  // Enable verbose logging to debug response issues
+            verbose: false,
             input_audio_transcription: true,
             output_audio_transcription: true,
-            automaticActivityDetection: true
+            // swift-gemini-api maps this to "disabled", so false enables server VAD.
+            automaticActivityDetection: false
         )
 
         super.init()
@@ -201,12 +206,16 @@ final class GeminiLiveClientAdapter: NSObject {
                 self.delegate?.geminiLiveClientAdapter(self, didReceiveAudioLevel: rms)
             }
 
+            if Date() < self.suppressMicUntil || self.isMuted {
+                return
+            }
+
             self.client.sendAudio(base64: base64Audio)
         }
     }
 
     private func configureGeminiAudioSession() {
-        AudioSessionManager.shared.configureForRecording(sampleRate: 16000)
+        AudioSessionManager.shared.configureForGeminiVoiceChat(sampleRate: 16000)
         AudioSessionManager.shared.forceToSpeaker()
     }
 
@@ -237,6 +246,7 @@ final class GeminiLiveClientAdapter: NSObject {
         // Handle output transcription (assistant's response text)
         client.setOutputTranscription { [weak self] text in
             guard let self = self else { return }
+            self.suppressMicUntil = Date().addingTimeInterval(self.micSuppressionWindow)
             // Disable local TTS since we are using native audio
             // self.speechController.appendAndDebounce(text)
             let item = ConversationItem(

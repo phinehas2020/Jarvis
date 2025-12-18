@@ -28,6 +28,8 @@ class XAILiveClient: NSObject {
     private var isConnected = false
     private var sessionConfirmed = false
     
+    var isMuted: Bool = false
+    
     // Audio Input (Mic) - Using LocalAudioRecorder (AVAudioEngine-based) instead of CaptureSessionRecorder
     // to avoid FigAudioSession conflicts when using AVAudioEngine for playback
     private let audioRecorder = LocalAudioRecorder()
@@ -56,7 +58,7 @@ class XAILiveClient: NSObject {
     
     // Callbacks
     var onConnectionStateChange: ((ConnectionState) -> Void)?
-    var onMessageReceived: ((_ role: String, _ text: String) -> Void)?
+    var onMessageReceived: ((_ role: String, _ text: String, _ itemId: String, _ isDelta: Bool) -> Void)?
     var onToolCall: ((_ name: String, _ callId: String, _ arguments: String) -> Void)?
     var onError: ((Error) -> Void)?
     var onAudioLevel: ((Float) -> Void)?
@@ -202,11 +204,13 @@ class XAILiveClient: NSObject {
             }
             
             // Send mic audio as input_audio_buffer.append
-            let event: [String: Any] = [
-                "type": "input_audio_buffer.append",
-                "audio": base64
-            ]
-            self.sendJSON(event)
+            if !self.isMuted {
+                let event: [String: Any] = [
+                    "type": "input_audio_buffer.append",
+                    "audio": base64
+                ]
+                self.sendJSON(event)
+            }
         }
     }
     
@@ -251,7 +255,7 @@ class XAILiveClient: NSObject {
             ],
             "turn_detection": [
                 "type": "server_vad",
-                "threshold": 0.5,
+                "threshold": 0.4,
                 "prefix_padding_ms": 300,
                 "silence_duration_ms": 500
             ]
@@ -395,20 +399,24 @@ class XAILiveClient: NSObject {
             
         // xAI uses "response.output_audio_transcript.delta" for streaming transcript
         case "response.output_audio_transcript.delta", "response.audio_transcript.delta":
-            if let delta = event["delta"] as? String {
-                self.onMessageReceived?("assistant", delta)
+            if let delta = event["delta"] as? String,
+               let itemId = event["item_id"] as? String {
+                self.onMessageReceived?("assistant", delta, itemId, true)
             }
             
         // xAI sends full transcript in "response.output_audio_transcript.done"
         case "response.output_audio_transcript.done":
-            if let transcript = event["transcript"] as? String {
+            if let transcript = event["transcript"] as? String,
+               let itemId = event["item_id"] as? String {
                 print("📝 XAI: Assistant said: \(transcript)")
+                self.onMessageReceived?("assistant", transcript, itemId, false)
             }
             
         case "conversation.item.input_audio_transcription.completed":
-            if let transcript = event["transcript"] as? String {
+            if let transcript = event["transcript"] as? String,
+               let itemId = event["item_id"] as? String {
                 print("🎤 XAI: User said: \(transcript)")
-                self.onMessageReceived?("user", transcript)
+                self.onMessageReceived?("user", transcript, itemId, false)
             }
             
         case "input_audio_buffer.speech_started":
@@ -479,6 +487,7 @@ class XAILiveClient: NSObject {
     // MARK: - Tool Call Response
     
     /// Send the result of a tool/function call back to the API
+    /// Send the result of a tool/function call back to the API
     func sendToolResult(callId: String, result: String) {
         let event: [String: Any] = [
             "type": "conversation.item.create",
@@ -490,8 +499,11 @@ class XAILiveClient: NSObject {
         ]
         print("🔧 XAI: Sending tool result for callId: \(callId)")
         sendJSON(event)
-        
-        // Trigger a response after sending the tool result
+    }
+    
+    /// Manually trigger the assistant to generate a response (e.g. after tool results)
+    func createResponse() {
+        print("💬 XAI: Manually triggering response.create")
         sendJSON(["type": "response.create"])
     }
     

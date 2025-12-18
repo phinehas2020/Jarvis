@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import WebRTC
 import AVFoundation
 import UIKit
@@ -13,6 +14,7 @@ import CoreTelephony
 import Intents
 import UserNotifications
 import IntentsUI
+import ActivityKit
 
 // MARK: - WebRTCManager
 class WebRTCManager: NSObject, ObservableObject {
@@ -34,12 +36,19 @@ class WebRTCManager: NSObject, ObservableObject {
     // We'll store items by item_id for easy updates
     private var conversationMap: [String : ConversationItem] = [:]
     private var awaitingToolResponse = false
+    private var lastGeminiAssistantItemId: String?
+    private var lastGeminiAssistantUpdateAt: Date = .distantPast
+    private var lastGeminiUserItemId: String?
+    private var lastGeminiUserUpdateAt: Date = .distantPast
+    private let geminiAssistantMergeWindow: TimeInterval = 1.5
+    private let geminiUserMergeWindow: TimeInterval = 1.0
     
     // Model & session config
     private var modelName: String = "gpt-4o-mini-realtime-preview-2024-12-17"
     private var systemInstructions: String = ""
     private var voice: String = "alloy"
     private var currentApiKey: String = ""
+    private var currentXaiApiKey: String = ""
     
     // MCP Tools configuration
     private var mcpTools: [[String: Any]] = []
@@ -105,6 +114,7 @@ class WebRTCManager: NSObject, ObservableObject {
 
     private var geminiClient: GeminiLiveClientAdapter?
     private var xaiClient: XAILiveClient?
+    private var responseDebounceTimer: Timer?
     
     // Persistent MCP connection for background notifications
     private var mcpWebSocketTask: URLSessionWebSocketTask?
@@ -112,8 +122,175 @@ class WebRTCManager: NSObject, ObservableObject {
     private var mcpPendingResponses: [String: ([String: Any]) -> Void] = [:]
     private let mcpLock = NSLock()
     private let mcpNotificationQueue = DispatchQueue(label: "com.jarvis.mcp.notifications")
+    private var cancellables = Set<AnyCancellable>()
+
+    // Live Activity Management
+    private var currentActivity: Activity<JarvisActivityAttributes>?
+
+    override init() {
+        super.init()
+        setupNotificationObservers()
+    }
+    
+    private func setupNotificationObservers() {
+        NotificationCenter.default.addObserver(forName: .toggleMuteFromIntent, object: nil, queue: .main) { [weak self] _ in
+            self?.toggleMute()
+        }
+        
+        NotificationCenter.default.addObserver(forName: .startJarvisFromIntent, object: nil, queue: .main) { [weak self] _ in
+            self?.startConnectionWithStoredConfig()
+        }
+        
+        NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.startLiveActivity()
+        }
+        
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.endLiveActivity()
+        }
+        
+        $connectionStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateLiveActivity()
+            }
+            .store(in: &cancellables)
+            
+        $isMicMuted
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateLiveActivity()
+            }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Live Activity Lifecycle
+    
+    private func startLiveActivity() {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        
+        let initialContentState = JarvisActivityAttributes.ContentState(
+            status: connectionStatus.description,
+            isMuted: isMicMuted
+        )
+        let activityAttributes = JarvisActivityAttributes(name: "Jarvis Session")
+        
+        do {
+            currentActivity = try Activity.request(
+                attributes: activityAttributes,
+                content: .init(state: initialContentState, staleDate: nil),
+                pushType: nil
+            )
+            print("🌟 Live Activity started")
+        } catch {
+            print("❌ Failed to start Live Activity: \(error.localizedDescription)")
+        }
+    }
+    
+    private func updateLiveActivity() {
+        Task {
+            let state = JarvisActivityAttributes.ContentState(
+                status: connectionStatus.description,
+                isMuted: isMicMuted
+            )
+            await currentActivity?.update(.init(state: state, staleDate: nil))
+        }
+    }
+    
+    private func endLiveActivity() {
+        Task {
+            await currentActivity?.end(nil, dismissalPolicy: .immediate)
+            currentActivity = nil
+            print("👋 Live Activity ended")
+        }
+    }
 
     // Private tool definitions helper
+    private func getMcpFunctionDefinitions() -> [[String: Any]] {
+        var mcpFuncs: [[String: Any]] = []
+        for name in mcpExpectedToolNames {
+            var params: [String: Any] = ["type": "object", "properties": [String: Any](), "required": [String]()]
+            
+            // Special handling for known tools to provide better schemas
+            if name == "send_imessage" {
+                params = [
+                    "type": "object",
+                    "properties": [
+                        "to": ["type": "string", "description": "Recipient phone number or email address"],
+                        "text": ["type": "string", "description": "The message text to send"]
+                    ],
+                    "required": ["to", "text"]
+                ]
+            } else if name == "fetch_messages" {
+                params = [
+                    "type": "object",
+                    "properties": [
+                        "handle": ["type": "string", "description": "Contact handle or nickname"],
+                        "chatGuid": ["type": "string", "description": "Explicit Chat GUID"],
+                        "limit": ["type": "integer", "description": "Number of messages to fetch"]
+                    ],
+                    "required": []
+                ]
+            } else if name == "get_recent_messages" {
+                params = [
+                    "type": "object",
+                    "properties": [
+                        "messagesPerChat": ["type": "integer", "description": "Latest n messages per thread (default 2)"]
+                    ],
+                    "required": []
+                ]
+            } else if name == "send_tapback" {
+                params = [
+                    "type": "object",
+                    "properties": [
+                        "chatGuid": ["type": "string", "description": "The GUID of the conversation"],
+                        "messageGuid": ["type": "string", "description": "The GUID of the message to react to"],
+                        "reaction": [
+                            "type": "string",
+                            "enum": ["love", "like", "dislike", "laugh", "question", "emphasize"],
+                            "description": "The reaction type"
+                        ]
+                    ],
+                    "required": ["chatGuid", "messageGuid", "reaction"]
+                ]
+            } else if name == "rename_group" {
+                params = [
+                    "type": "object",
+                    "properties": [
+                        "chatGuid": ["type": "string", "description": "The GUID of the thread"],
+                        "displayName": ["type": "string", "description": "The new group name"]
+                    ],
+                    "required": ["chatGuid", "displayName"]
+                ]
+            } else if name == "mark_chat_read" {
+                params = [
+                    "type": "object",
+                    "properties": [
+                        "chatGuid": ["type": "string", "description": "The GUID of the thread to clear"]
+                    ],
+                    "required": ["chatGuid"]
+                ]
+            } else if name == "execute_task" {
+                params = [
+                    "type": "object",
+                    "properties": [
+                        "task": ["type": "string", "description": "The instruction for the computer agent"],
+                        "background": ["type": "boolean", "description": "Run silently and notify phone when done", "default": false]
+                    ],
+                    "required": ["task"]
+                ]
+            }
+            
+            mcpFuncs.append([
+                "type": "function",
+                "name": name,
+                "description": "MCP tool: \(name)",
+                "parameters": params
+            ])
+        }
+        return mcpFuncs
+    }
+
     func getLocalTools() -> [[String: Any]] {
         return [
             [
@@ -581,7 +758,16 @@ class WebRTCManager: NSObject, ObservableObject {
     /// Toggle microphone mute/unmute
     func toggleMute() {
         isMicMuted.toggle()
+        
+        // 1. WebRTC (OpenAI)
         audioTrack?.isEnabled = !isMicMuted
+        
+        // 2. Gemini
+        geminiClient?.isMuted = isMicMuted
+        
+        // 3. xAI
+        xaiClient?.isMuted = isMicMuted
+        
         print("🎤 Microphone \(isMicMuted ? "muted" : "unmuted")")
     }
     
@@ -2069,6 +2255,62 @@ class WebRTCManager: NSObject, ObservableObject {
             return ""
         }
     }
+
+    private func mergeGeminiTranscript(existing: String, incoming: String) -> String {
+        if incoming.isEmpty { return existing }
+        if existing.isEmpty { return incoming }
+        if incoming.hasPrefix(existing) { return incoming }
+        if existing.hasSuffix(incoming) { return existing }
+
+        let maxOverlap = min(existing.count, incoming.count)
+        if maxOverlap > 0 {
+            for overlap in stride(from: maxOverlap, to: 0, by: -1) {
+                let existingSuffix = String(existing.suffix(overlap))
+                let incomingPrefix = String(incoming.prefix(overlap))
+                if existingSuffix == incomingPrefix {
+                    return existing + incoming.dropFirst(overlap)
+                }
+            }
+        }
+
+        return existing + incoming
+    }
+
+    private func appendOrMergeGeminiAssistantMessage(_ message: ConversationItem) {
+        let now = Date()
+        if let lastId = lastGeminiAssistantItemId,
+           now.timeIntervalSince(lastGeminiAssistantUpdateAt) <= geminiAssistantMergeWindow,
+           let index = conversation.firstIndex(where: { $0.id == lastId }) {
+            let merged = mergeGeminiTranscript(existing: conversation[index].text, incoming: message.text)
+            conversation[index].text = merged
+            conversationMap[lastId] = conversation[index]
+            lastGeminiAssistantUpdateAt = now
+            return
+        }
+
+        conversation.append(message)
+        conversationMap[message.id] = message
+        lastGeminiAssistantItemId = message.id
+        lastGeminiAssistantUpdateAt = now
+    }
+
+    private func appendOrMergeGeminiUserMessage(_ message: ConversationItem) {
+        let now = Date()
+        if let lastId = lastGeminiUserItemId,
+           now.timeIntervalSince(lastGeminiUserUpdateAt) <= geminiUserMergeWindow,
+           let index = conversation.firstIndex(where: { $0.id == lastId }) {
+            let merged = mergeGeminiTranscript(existing: conversation[index].text, incoming: message.text)
+            conversation[index].text = merged
+            conversationMap[lastId] = conversation[index]
+            lastGeminiUserUpdateAt = now
+            return
+        }
+
+        conversation.append(message)
+        conversationMap[message.id] = message
+        lastGeminiUserItemId = message.id
+        lastGeminiUserUpdateAt = now
+    }
     
     /// Feed MCP tool results back to the agent as conversation items
     private func feedMCPResultsToAgent(callId: String, output: String) {
@@ -2111,33 +2353,34 @@ class WebRTCManager: NSObject, ObservableObject {
 
         if currentProvider == .xai {
             xaiClient?.sendToolResult(callId: callId, result: output)
-            return
-        }
+        } else {
+            guard let dc = dataChannel, dc.readyState == .open else {
+                print("❌ Data channel not ready to send function call output")
+                return
+            }
 
-        guard let dc = dataChannel, dc.readyState == .open else {
-            print("❌ Data channel not ready to send function call output")
-            return
-        }
-
-        let functionResult: [String: Any] = [
-            "type": "conversation.item.create",
-            "previous_item_id": previousItemId,
-            "item": [
-                "type": "function_call_output",
-                "call_id": callId,
-                "output": output
+            let functionResult: [String: Any] = [
+                "type": "conversation.item.create",
+                "previous_item_id": previousItemId,
+                "item": [
+                    "type": "function_call_output",
+                    "call_id": callId,
+                    "output": output
+                ]
             ]
-        ]
-
-        do {
-            let jsonData = try JSONSerialization.data(withJSONObject: functionResult)
-            let buffer = RTCDataBuffer(data: jsonData, isBinary: false)
-            dc.sendData(buffer)
-            print("✅ Sent function call output for call_id: \(callId)")
-            requestAssistantResponseAfterTool(force: true, context: "local-function:\(callId)")
-        } catch {
-            print("❌ Failed to send function call output: \(error)")
+            
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: functionResult)
+                let buffer = RTCDataBuffer(data: jsonData, isBinary: false)
+                dc.sendData(buffer)
+                print("✅ Sent function call result for \(callId)")
+            } catch {
+                print("❌ Failed to send function call result: \(error)")
+            }
         }
+        
+        // Both OpenAI and xAI use this trigger to get a response after tool output
+        requestAssistantResponseAfterTool(force: true, context: "function:\(callId)")
     }
 
     // MARK: - MCP Client
@@ -2404,10 +2647,13 @@ class WebRTCManager: NSObject, ObservableObject {
         return String(data: data, encoding: .utf8)
     }
 
-    /// Call a standard text model for token-heavy tasks (defaults to gpt-5-2025-08-07)
+    /// Call a standard text model for token-heavy tasks (defaults to grok-4-1-fast-non-reasoning)
     private func performDelegatedTextCompletion(apiKey: String, prompt: String, system: String?, model: String, maxOutputTokens: Int?) async throws -> String {
-        guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
-            throw NSError(domain: "WebRTCManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid OpenAI URL"])
+        let isXai = model.lowercased().contains("grok")
+        let urlString = isXai ? "https://api.x.ai/v1/chat/completions" : "https://api.openai.com/v1/chat/completions"
+        
+        guard let url = URL(string: urlString) else {
+            throw NSError(domain: "WebRTCManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid \(isXai ? "xAI" : "OpenAI") URL"])
         }
 
         var messages: [[String: Any]] = []
@@ -3308,12 +3554,17 @@ class WebRTCManager: NSObject, ObservableObject {
 
             let system = argDict["system"] as? String
             let trimmedModel = (argDict["model"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let delegatedModel = (trimmedModel?.isEmpty == false ? trimmedModel : nil) ?? "gpt-4o"
+            let delegatedModel = (trimmedModel?.isEmpty == false ? trimmedModel : nil) ?? "grok-4-1-fast-non-reasoning"
             let maxTokens = argDict["max_output_tokens"] as? Int
 
-            guard !currentApiKey.isEmpty else {
-                print("❌ Missing API key for delegated text completion call")
-                if let output = jsonString(from: ["error": "Missing API key for delegated text completion"]) {
+            // Determine help API key based on the model
+            let isXaiModel = delegatedModel.lowercased().contains("grok")
+            let targetApiKey = isXaiModel ? currentXaiApiKey : currentApiKey
+
+            guard !targetApiKey.isEmpty else {
+                let errorMsg = "Missing \(isXaiModel ? "xAI" : "OpenAI") API key for delegated text completion (\(delegatedModel))"
+                print("❌ \(errorMsg)")
+                if let output = jsonString(from: ["error": errorMsg]) {
                     sendFunctionCallOutput(previousItemId: itemId, callId: callId, output: output)
                 }
                 return
@@ -3323,7 +3574,7 @@ class WebRTCManager: NSObject, ObservableObject {
                 guard let self else { return }
                 do {
                     let delegatedText = try await self.performDelegatedTextCompletion(
-                        apiKey: self.currentApiKey,
+                        apiKey: targetApiKey,
                         prompt: prompt,
                         system: system,
                         model: delegatedModel,
@@ -3451,6 +3702,17 @@ class WebRTCManager: NSObject, ObservableObject {
         geminiLiveEndpoint: String? = nil,
         xaiApiKey: String? = nil
     ) {
+        // Store config for remote start
+        UserDefaults.standard.set(apiKey, forKey: "last_apiKey")
+        UserDefaults.standard.set(provider.rawValue, forKey: "last_provider")
+        UserDefaults.standard.set(modelName, forKey: "last_modelName")
+        UserDefaults.standard.set(systemMessage, forKey: "last_systemMessage")
+        UserDefaults.standard.set(voice, forKey: "last_voice")
+        UserDefaults.standard.set(geminiApiKey, forKey: "last_geminiApiKey")
+        UserDefaults.standard.set(geminiModel, forKey: "last_geminiModel")
+        UserDefaults.standard.set(geminiLiveEndpoint, forKey: "last_geminiLiveEndpoint")
+        UserDefaults.standard.set(xaiApiKey, forKey: "last_xaiApiKey")
+        
         print("🔍 WebRTCManager: Start Connection Called")
         print("   - Provider: \(provider.rawValue)")
         print("   - xAI API Key: \(xaiApiKey?.prefix(8) ?? "nil")...")
@@ -3459,7 +3721,49 @@ class WebRTCManager: NSObject, ObservableObject {
         
         conversation.removeAll()
         conversationMap.removeAll()
+        lastGeminiAssistantItemId = nil
+        lastGeminiUserItemId = nil
+        lastGeminiUserUpdateAt = .distantPast
         
+        startConnectionImplementation(apiKey: apiKey, provider: provider, modelName: modelName, systemMessage: systemMessage, voice: voice, geminiApiKey: geminiApiKey, geminiModel: geminiModel, geminiLiveEndpoint: geminiLiveEndpoint, xaiApiKey: xaiApiKey)
+    }
+    
+    func startConnectionWithStoredConfig() {
+        let defaults = UserDefaults.standard
+        guard let apiKey = defaults.string(forKey: "last_apiKey"),
+              let providerStr = defaults.string(forKey: "last_provider"),
+              let provider = VoiceProvider(rawValue: providerStr),
+              let modelName = defaults.string(forKey: "last_modelName"),
+              let systemMessage = defaults.string(forKey: "last_systemMessage"),
+              let voice = defaults.string(forKey: "last_voice") else {
+            print("⚠️ Cannot start connection: stored config missing")
+            return
+        }
+        
+        startConnectionImplementation(
+            apiKey: apiKey,
+            provider: provider,
+            modelName: modelName,
+            systemMessage: systemMessage,
+            voice: voice,
+            geminiApiKey: defaults.string(forKey: "last_geminiApiKey"),
+            geminiModel: defaults.string(forKey: "last_geminiModel"),
+            geminiLiveEndpoint: defaults.string(forKey: "last_geminiLiveEndpoint"),
+            xaiApiKey: defaults.string(forKey: "last_xaiApiKey")
+        )
+    }
+    
+    private func startConnectionImplementation(
+        apiKey: String,
+        provider: VoiceProvider,
+        modelName: String,
+        systemMessage: String,
+        voice: String,
+        geminiApiKey: String?,
+        geminiModel: String?,
+        geminiLiveEndpoint: String?,
+        xaiApiKey: String?
+    ) {
         if provider == .gemini {
             print("🔷 Using Gemini Provider")
             let resolvedApiKey = (geminiApiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3496,16 +3800,15 @@ class WebRTCManager: NSObject, ObservableObject {
             peerConnection = nil
             dataChannel = nil
             audioTrack = nil
-            videoTrack = nil
-
             self.currentApiKey = apiKey
+            self.currentXaiApiKey = xaiApiKey ?? ""
 
             geminiClient?.disconnect()
 
             // Gather all tools for Gemini
             var allTools: [[String: Any]] = []
             allTools.append(contentsOf: getLocalTools())
-            allTools.append(contentsOf: mcpTools)
+            allTools.append(contentsOf: getMcpFunctionDefinitions())
 
             let client = GeminiLiveClientAdapter(apiKey: resolvedApiKey, model: resolvedModel, systemPrompt: systemMessage, tools: allTools)
             client.delegate = self
@@ -3544,16 +3847,16 @@ class WebRTCManager: NSObject, ObservableObject {
             peerConnection = nil
             dataChannel = nil
             audioTrack = nil
-            videoTrack = nil
-
             self.currentApiKey = apiKey
+            self.currentXaiApiKey = resolvedApiKey
+
             geminiClient?.disconnect()
             xaiClient?.disconnect()
 
-            // Gather all tools for XAI (same as OpenAI format)
+            // Gather all tools for XAI (standard function format)
             var allTools: [[String: Any]] = []
             allTools.append(contentsOf: getLocalTools())
-            allTools.append(contentsOf: mcpTools)
+            allTools.append(contentsOf: getMcpFunctionDefinitions())
             print("   - Gathered \(allTools.count) tools for XAI")
 
             print("   - Initializing XAILiveClient...")
@@ -3569,27 +3872,44 @@ class WebRTCManager: NSObject, ObservableObject {
                 print("🔌 XAI Client State Changed: \(state)")
                 DispatchQueue.main.async {
                     switch state {
-                    case .connected: self?.connectionStatus = .connected
+                    case .connected:
+                        self?.connectionStatus = .connected
+                        self?.forceAudioToSpeaker()
+                        self?.enableBackgroundMode()
                     case .connecting: self?.connectionStatus = .connecting
                     case .disconnected: self?.connectionStatus = .disconnected
                     }
                 }
             }
 
-            client.onMessageReceived = { [weak self] role, text in
-                 let item = ConversationItem(id: UUID().uuidString, role: role, text: text)
-                 DispatchQueue.main.async {
-                     self?.conversation.append(item)
-                     self?.conversationMap[item.id] = item
-                 }
+            client.onMessageReceived = { [weak self] role, text, itemId, isDelta in
+                guard let self = self else { return }
+                DispatchQueue.main.async {
+                    if let existingIdx = self.conversation.firstIndex(where: { $0.id == itemId }) {
+                        if isDelta {
+                            self.conversation[existingIdx].text += text
+                        } else {
+                            self.conversation[existingIdx].text = text
+                        }
+                        self.conversationMap[itemId] = self.conversation[existingIdx]
+                    } else {
+                        let newItem = ConversationItem(id: itemId, role: role, text: text)
+                        self.conversation.append(newItem)
+                        self.conversationMap[itemId] = newItem
+                    }
+                }
             }
 
             client.onToolCall = { [weak self] name, callId, arguments in
                 guard let self = self else { return }
-                print("🔧 XAI: Executing tool '\(name)' with callId: \(callId)")
+                print("🔧 XAI: Tool call received: '\(name)' with callId: \(callId)")
+                
+                // Track that we are awaiting output to coordinate response triggering
+                self.markAwaitingToolResponse(context: name)
                 
                 // 1. Check if it's an MCP tool
                 if self.mcpExpectedToolNames.contains(name) || self.mcpTools.contains(where: { ($0["server_label"] as? String) == name }) {
+                    print("🔧 XAI: Handling as MCP tool: \(name)")
                     Task { [weak self] in
                         guard let self = self else { return }
                         
@@ -3599,12 +3919,19 @@ class WebRTCManager: NSObject, ObservableObject {
                             argDict = parsed
                         }
                         
+                        // Argument normalization (same as OpenAI path)
+                        if name == "send_imessage", argDict["text"] == nil, let messageText = argDict["message"] as? String {
+                            argDict["text"] = messageText
+                        }
+                        
                         let result = await self.performMcpToolCall(name: name, arguments: argDict)
-                        self.xaiClient?.sendToolResult(callId: callId, result: result)
+                        await MainActor.run {
+                            self.sendFunctionCallOutput(previousItemId: callId, callId: callId, output: result)
+                        }
                     }
                 } else {
                     // 2. Handle as a local tool (unified logic)
-                    // itemId isn't strictly used for xAI but we pass callId as a surrogate if needed
+                    print("🔧 XAI: Handling as local tool: \(name)")
                     self.handleLocalFunctionCall(itemId: callId, callId: callId, name: name, arguments: arguments)
                 }
             }
@@ -3638,6 +3965,7 @@ class WebRTCManager: NSObject, ObservableObject {
         self.systemInstructions = systemMessage
         self.voice = voice
         self.currentApiKey = apiKey
+        self.currentXaiApiKey = xaiApiKey ?? ""
 
         setupPeerConnection()
         setupLocalAudio()
@@ -3785,6 +4113,11 @@ class WebRTCManager: NSObject, ObservableObject {
     
     /// Sends a "response.create" event
     func createResponse() {
+        if currentProvider == .xai {
+            xaiClient?.createResponse()
+            return
+        }
+        
         guard let dc = dataChannel else { return }
         
         let realtimeEvent: [String: Any] = [ "type": "response.create" ]
@@ -3806,8 +4139,17 @@ class WebRTCManager: NSObject, ObservableObject {
         }
         
         awaitingToolResponse = false
-        print("🎙️ Triggering assistant response after tool output (\(context))")
-        createResponse()
+        print("🎙️ Queueing assistant response after tool output (\(context))...")
+        
+        // Use a small debounce to coalesce multiple tool completions into one response
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.responseDebounceTimer?.invalidate()
+            self.responseDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
+                print("🎙️ Triggering assistant response now.")
+                self?.createResponse()
+            }
+        }
     }
     
     /// Called automatically when data channel opens, or you can manually call it.
@@ -3843,8 +4185,9 @@ class WebRTCManager: NSObject, ObservableObject {
         // Add Local Tools
         allTools.append(contentsOf: getLocalTools())
         
-        // Add MCP tools if configured
-        allTools.append(contentsOf: mcpTools)
+        // Add MCP tools as standard function definitions
+        // (OpenAI/xAI Realtime API only supports type: "function")
+        allTools.append(contentsOf: getMcpFunctionDefinitions())
         
         if !allTools.isEmpty {
             sessionConfig["tools"] = allTools
@@ -3919,10 +4262,23 @@ class WebRTCManager: NSObject, ObservableObject {
             try audioSession.setMode(.videoChat)
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
             
-            // Force audio to loudspeaker (not earpiece)
-            try audioSession.overrideOutputAudioPort(.speaker)
-            
-            print("🔊 Audio routed to main speaker (loudspeaker)")
+            let outputs = audioSession.currentRoute.outputs
+            let hasExternalOutput = outputs.contains { output in
+                switch output.portType {
+                case .bluetoothA2DP, .bluetoothHFP, .bluetoothLE, .headphones, .headsetMic, .usbAudio, .carAudio:
+                    return true
+                default:
+                    return false
+                }
+            }
+
+            // Force audio to loudspeaker (not earpiece) unless using external output.
+            if !hasExternalOutput {
+                try audioSession.overrideOutputAudioPort(.speaker)
+                print("🔊 Audio routed to main speaker (loudspeaker)")
+            } else {
+                print("🔊 External audio route active")
+            }
             print("🌟 Background audio support enabled")
             
         } catch {
@@ -4398,13 +4754,23 @@ extension WebRTCManager: GeminiLiveClientAdapterDelegate {
     func geminiLiveClientAdapter(_ client: GeminiLiveClientAdapter, didChangeStatus status: ConnectionStatus) {
         DispatchQueue.main.async {
             self.connectionStatus = status
+            if status == .connected {
+                self.forceAudioToSpeaker()
+                self.enableBackgroundMode()
+            }
         }
     }
 
     func geminiLiveClientAdapter(_ client: GeminiLiveClientAdapter, didReceiveMessage message: ConversationItem) {
         DispatchQueue.main.async {
-            self.conversation.append(message)
-            self.conversationMap[message.id] = message
+            if message.role == "assistant" {
+                self.appendOrMergeGeminiAssistantMessage(message)
+            } else if message.role == "user" {
+                self.appendOrMergeGeminiUserMessage(message)
+            } else {
+                self.conversation.append(message)
+                self.conversationMap[message.id] = message
+            }
         }
     }
 

@@ -1,55 +1,59 @@
-# Jarvis - AI Assistant with MCP
+# Jarvis - AI Voice Assistant with Desktop Control
 
-A voice-activated AI assistant iOS app powered by OpenAI's Realtime API with Model Context Protocol (MCP) integrations for device control and iMessage via BlueBubbles.
+Jarvis is a high-performance, low-latency AI voice assistant for iOS. It features multiple AI provider support (OpenAI, Gemini, xAI), real-time desktop control, and deep iMessage integration via the Model Context Protocol (MCP).
 
-## Features
+## ✨ Key Features
 
-- **Voice Interaction**: Real-time voice conversations using WebRTC
-- **Device Control**: Brightness, volume, haptics, screenshots
-- **Media**: Apple Music control, playlists, photos, camera
-- **Productivity**: Calendar events, reminders, notes, alarms, shortcuts
-- **iMessage**: Send and receive messages via BlueBubbles MCP bridge
+- **🗣️ Advanced Voice Pro**: Natural conversations using WebRTC and native audio engines (xAI, Gemini, OpenAI).
+- **🖥️ Desktop Agent**: Control your Mac via voice. Open apps, take screenshots, run terminal commands, and browse the web.
+- **🚀 Background Tasks**: Delegate complex tasks (like "Organize my spreadsheets") and Jarvis will notify you when he's done while you keep talking.
+- **💬 iMessage Power-User**: Full BlueBubbles integration. Send messages, fetch history, and even send **Tapbacks** or rename groups via voice.
+- **🔍 Vision Support**: Show Jarvis your screen or camera, and he'll help you debug code, find files, or describe what he sees.
 
-## Architecture
+## 🏗️ Architecture
 
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Jarvis iOS    │◄───►│  OpenAI Realtime │◄───►│   MCP Servers   │
-│      App        │     │       API        │     │  (BlueBubbles)  │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
-```
-
-## Requirements
-
-- iOS 17.0+
-- Xcode 15+
-- OpenAI API key with Realtime API access
-- Mac mini with BlueBubbles (for iMessage)
-
-## Setup
-
-1. Open `Jarvis with MCP.xcodeproj` in Xcode
-2. Build and run on your iOS device
-3. Configure your OpenAI API key in Settings
-4. (Optional) Configure BlueBubbles MCP server URL for iMessage
-
-## Project Structure
-
-```
-├── VoiceModeWebRTCSwift/
-│   ├── ContentView.swift        # Main UI
-│   ├── WebRTCManager.swift      # WebRTC/OpenAI connection
-│   ├── SystemPrompt.md          # AI system instructions
-│   └── Assets.xcassets/         # App icons and assets
-├── Jarvis with MCP.xcodeproj/   # Xcode project
-└── AGENTS.md                    # AI agent guidelines
+```mermaid
+graph TD
+    A[Jarvis iOS App] <-->|WebRTC/WS| B[Realtime API Providers]
+    B <--> C[OpenAI / Gemini / xAI]
+    A <-->|Persistent WebSocket| D[Mac Mini MCP Bridge]
+    D <--> E[Computer Agent]
+    D <--> F[BlueBubbles / iMessage]
 ```
 
-## iMessage via BlueBubbles
+## 🛠️ Requirements
 
-The app supports iMessage through a BlueBubbles MCP bridge running on a Mac mini. See [AGENTS.md](AGENTS.md) for setup instructions.
+- **iOS**: iPhone running iOS 17.0+ (and Xcode 15+ to build).
+- **AI Keys**: OpenAI (Realtime API access), xAI (Grok), and/or Google Gemini.
+- **Server**: A Mac Mini (or always-on Mac) with [BlueBubbles](https://bluebubbles.app) installed for the iMessage functionality.
 
-## License
+## 🚀 Getting Started
+
+### 1. iOS App Setup
+1. Clone this repository.
+2. Open `Jarvis with MCP.xcodeproj` in Xcode.
+3. Build and run on your physical iPhone (WebRTC requires a physical device for microphone reliability).
+4. Tap the **Gear Icon** in the app to configure your API keys.
+
+### 2. Mac Mini Bridge Setup
+For full functionality, you must set up the MCP bridge on your Mac.
+1. Follow the [Step-by-Step Bridge Setup](mac-mini-setup/SETUP_INSTRUCTIONS.md).
+2. Ensure `pm2` is running to keep the bridge alive.
+3. Note your Cloudflare or Tailscale URL and Bearer Token.
+
+### 3. Connect App to Bridge
+1. In the iOS App Settings, under **Custom MCP Server**:
+   - **Label**: `bluebubbles`
+   - **URL**: `https://your-bridge-url/mcp`
+   - **Auth**: Your secure Bearer Token.
+
+## 📁 Project Structure
+
+- `VoiceModeWebRTCSwift/`: Main iOS application source code.
+- `mac-mini-setup/`: Server-side bridge and Computer Agent logic.
+- `AGENTS.md`: Technical guide for the AI tools and schemas.
+
+## 📜 License
 
 Private repository - all rights reserved.
 

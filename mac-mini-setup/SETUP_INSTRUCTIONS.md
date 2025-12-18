@@ -1,259 +1,112 @@
-# BlueBubbles MCP Bridge Setup Instructions
+# BlueBubbles MCP Bridge & Computer Agent Setup
 
-Run these commands on the Mac mini where BlueBubbles is installed.
+This guide will help you set up the Jarvis server component on your Mac Mini. This bridge enables iMessage control and the "Computer Agent" desktop automation features.
 
-## Prerequisites Check
+## 🛠️ Prerequisites
 
-First, verify BlueBubbles is running and get its API details:
+1.  **BlueBubbles Server**: Installed and running on your Mac.
+2.  **iMessage Account**: Logged in on the Mac.
+3.  **Node.js**: v18 or newer installed (`brew install node`).
+4.  **PM2**: Process manager (`npm install -g pm2`).
+5.  **Cloudflare Tunnel**: (Optional but recommended) for secure remote access.
 
-```bash
-# Check if BlueBubbles is running
-ps aux | grep -i bluebubbles
-
-# Get your BlueBubbles server URL and password from the BlueBubbles app
-# Usually: http://localhost:1234 (check BlueBubbles Settings > API)
-```
-
-## Step 1: Install Node.js (if not installed)
+## Step 1: Prepare the Directory
 
 ```bash
-# Check if Node.js is installed
-node --version
-
-# If not installed, install via Homebrew
-brew install node
-
-# Verify installation
-node --version  # Should be v18+ 
-npm --version
-```
-
-## Step 2: Install Cloudflare Tunnel
-
-```bash
-# Install cloudflared via Homebrew
-brew install cloudflared
-
-# Verify installation
-cloudflared --version
-```
-
-## Step 3: Create the MCP Bridge Directory
-
-```bash
-# Create directory
 sudo mkdir -p /opt/imessage-bridge
 sudo chown $(whoami) /opt/imessage-bridge
 cd /opt/imessage-bridge
 ```
 
-## Step 4: Initialize the Project
+## Step 2: Install Dependencies
 
 ```bash
 cd /opt/imessage-bridge
-
-# Initialize npm project
 npm init -y
-
-# Install dependencies
-npm install @modelcontextprotocol/sdk express cors dotenv node-fetch
+npm install @modelcontextprotocol/sdk express cors dotenv node-fetch openai playwright
+npx playwright install chromium
 ```
 
-## Step 5: Create Environment File
+## Step 3: Configure Environment Variables
 
-```bash
-cd /opt/imessage-bridge
+Create a `.env` file in `/opt/imessage-bridge/`:
 
-cat > .env << 'EOF'
-# BlueBubbles Configuration
+```env
+# --- BlueBubbles ---
 BLUEBUBBLES_URL=http://localhost:1234
-BLUEBUBBLES_PASSWORD=your_bluebubbles_password_here
+BLUEBUBBLES_PASSWORD=your_server_password
 
-# MCP Server Configuration  
+# --- MCP Security ---
 MCP_PORT=3000
-MCP_BEARER_TOKEN=your_secure_random_token_here
+MCP_BEARER_TOKEN=your_secure_random_token
 
-# Generate a secure token with: openssl rand -hex 32
-EOF
+# --- AI Models (for Computer Agent) ---
+# Required for the background computer agent to think
+OPENAI_API_KEY=sk-....
+XAI_API_KEY=xai-....
 
-# Generate a secure bearer token
-echo "MCP_BEARER_TOKEN=$(openssl rand -hex 32)" >> .env.example
+# --- Agent Tuning ---
+# Defaults to grok-4-1-fast-non-reasoning for max speed
+COMPUTER_AGENT_MODEL=grok-4-1-fast-non-reasoning
+COMPUTER_AGENT_MAX_STEPS=20
 ```
 
-**IMPORTANT:** Edit `.env` and fill in:
-- `BLUEBUBBLES_PASSWORD` - Found in BlueBubbles app > Settings > API > Server Password
-- `BLUEBUBBLES_URL` - Usually `http://localhost:1234` (check BlueBubbles Settings)
-- `MCP_BEARER_TOKEN` - Generate with `openssl rand -hex 32`
+> [!TIP]
+> Generate a secure token with `openssl rand -hex 32`.
 
-## Step 6: Create the MCP Server
+## Step 4: Deploy the Code
 
-Create the main server file:
+Copy the following files from this repository to `/opt/imessage-bridge/src/`:
+1.  `mac-mini-setup/src/index.js` -> `src/index.js`
+2.  `mac-mini-setup/src/computer-agent.js` -> `src/computer-agent.js`
+3.  `mac-mini-setup/src/desktop-tools.js` -> `src/desktop-tools.js` (if present)
+4.  `mac-mini-setup/src/browser-tools.js` -> `src/browser-tools.js`
+5.  `mac-mini-setup/ComputerAgentPrompt.md` -> `../ComputerAgentPrompt.md` (relative to index.js)
 
-```bash
-cd /opt/imessage-bridge
-mkdir -p src
-```
+## Step 5: Start with PM2
 
-Then create `src/index.js` with the content from the `index.js` file in this folder.
-
-## Step 7: Test Locally
+PM2 ensures the bridge starts automatically if the Mac restarts.
 
 ```bash
-cd /opt/imessage-bridge
-
-# Start the server
-node src/index.js
-
-# In another terminal, test it:
-curl -X POST http://localhost:3000/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN_HERE" \
-  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
-```
-
-## Step 8: Set Up Cloudflare Tunnel
-
-```bash
-# Login to Cloudflare (opens browser)
-cloudflared tunnel login
-
-# Create a named tunnel
-cloudflared tunnel create imessage-bridge
-
-# Note the tunnel ID that's displayed (like: a]1234abcd-5678-efgh-ijkl-9876543210ab)
-```
-
-## Step 9: Configure the Tunnel
-
-```bash
-# Create tunnel config
-mkdir -p ~/.cloudflared
-
-cat > ~/.cloudflared/config.yml << 'EOF'
-tunnel: YOUR_TUNNEL_ID_HERE
-credentials-file: /Users/YOUR_USERNAME/.cloudflared/YOUR_TUNNEL_ID_HERE.json
-
-ingress:
-  - hostname: <your-imessage-hostname>
-    service: http://localhost:3000
-  - service: http_status:404
-EOF
-```
-
-**Replace:**
-- `YOUR_TUNNEL_ID_HERE` with your actual tunnel ID
-- `YOUR_USERNAME` with your macOS username
-- `<your-imessage-hostname>` with your desired subdomain
-
-## Step 10: Set Up DNS
-
-```bash
-# Create DNS record pointing to your tunnel
-cloudflared tunnel route dns imessage-bridge <your-imessage-hostname>
-```
-
-## Step 11: Install pm2 for Process Management
-
-```bash
-# Install pm2 globally
-npm install -g pm2
-
-# Start the MCP server with pm2
 cd /opt/imessage-bridge
 pm2 start src/index.js --name imessage-bridge
-
-# Start the tunnel with pm2
-pm2 start cloudflared --name cloudflare-tunnel -- tunnel run imessage-bridge
-
-# Save pm2 configuration
 pm2 save
-
-# Set up pm2 to start on boot
 pm2 startup
-# Follow the instructions it prints
 ```
 
-## Step 12: Verify Everything Works
+## Step 6: Expose to the Internet
 
-```bash
-# Check processes are running
-pm2 status
+If you aren't using a VPN, use a Cloudflare Tunnel:
+1.  `brew install cloudflared`
+2.  `cloudflared tunnel login`
+3.  `cloudflared tunnel create jarvis-bridge`
+4.  Configure your `~/.cloudflared/config.yml` to point `localhost:3000` to a subdomain.
+5.  `pm2 start cloudflared --name tunnel -- tunnel run jarvis-bridge`
 
-# Check logs
-pm2 logs imessage-bridge
-pm2 logs cloudflare-tunnel
+---
 
-# Test from the internet
-curl -X POST https://<your-imessage-hostname>/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN_HERE" \
-  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
-```
+## 🔧 Available Tools
 
-## Troubleshooting
+Once the bridge is connected to the iOS app, Jarvis can perform these actions:
 
-### BlueBubbles API not responding
-```bash
-# Check BlueBubbles is running
-ps aux | grep BlueBubbles
+### **iMessage & BlueBubbles**
+- `send_imessage`: Send text or attachments.
+- `send_tapback`: Send heart, like, laugh, etc.
+- `rename_group`: Rename any group chat.
+- `mark_chat_read`: Mark chats as read.
+- `fetch_messages`: Get chat history.
 
-# Test BlueBubbles API directly
-curl "http://localhost:1234/api/v1/server/info?password=YOUR_BB_PASSWORD"
-```
+### **Computer Automation**
+- `execute_task`: Triggers the **Computer Agent**.
+  - **Foreground**: Jarvis waits for the result.
+  - **Background**: Jarvis finishes the conversation and pings your phone when the task is done.
 
-### MCP Server not starting
-```bash
-# Check logs
-pm2 logs imessage-bridge --lines 50
+## ❓ Troubleshooting
 
-# Check for port conflicts
-lsof -i :3000
-```
+- **"Context is not defined"**: Ensure you have the latest `index.js`.
+- **Agent is slow**: Verify `COMPUTER_AGENT_MODEL` is set to a "fast" or "non-reasoning" variant.
+- **Microphone issues**: WebRTC requires a physical iOS device; simulator audio is often unreliable.
 
-### Tunnel not working
-```bash
-# Check tunnel status
-cloudflared tunnel info imessage-bridge
+---
 
-# Check tunnel logs
-pm2 logs cloudflare-tunnel --lines 50
-```
-
-## iOS App Configuration
-
-Once everything is running, configure the Jarvis iOS app:
-
-1. Open Jarvis app > Settings
-2. Enable "Custom MCP Server"
-3. Server Label: `bluebubbles`
-4. Server URL: `https://<your-imessage-hostname>/mcp`
-5. Auth Token: Your `MCP_BEARER_TOKEN` value
-
-Test by asking Jarvis to "send a test message to [phone number]"
-
-## Alternative: macOS LaunchAgents (no pm2)
-
-If you prefer native macOS service management, you can run the bridge and your personal tunnel with LaunchAgents instead of pm2.
-
-Example LaunchAgents:
-- `~/Library/LaunchAgents/com.phinehasadams.imessage-bridge.plist` – runs `/opt/imessage-bridge/server.js` (MCP on port `8788`).
-- `~/Library/LaunchAgents/com.phinehasadams.cloudflared-personal.plist` – runs `cloudflared tunnel` using a personal config (e.g., `~/.cloudflared-personal/config.yml`).
-
-Common commands:
-```bash
-# Enable/start
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.phinehasadams.imessage-bridge.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.phinehasadams.cloudflared-personal.plist
-
-# Restart
-launchctl kickstart -k gui/$(id -u)/com.phinehasadams.imessage-bridge
-launchctl kickstart -k gui/$(id -u)/com.phinehasadams.cloudflared-personal
-
-# Stop/disable
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.phinehasadams.imessage-bridge.plist
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.phinehasadams.cloudflared-personal.plist
-```
-
-Logs default to:
-- Bridge: `~/Library/Logs/imessage-bridge.out.log` / `imessage-bridge.err.log`
-- Tunnel: `~/Library/Logs/cloudflared-personal.out.log` / `cloudflared-personal.err.log`
+*Documentation updated: Dec 2025*

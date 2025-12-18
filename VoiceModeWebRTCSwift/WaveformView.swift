@@ -7,14 +7,15 @@ struct WaveformView: View {
     let amplitudes: [Float]
     let isActive: Bool
     let accentColor: Color
+    let barCount: Int
     
-    init(amplitudes: [Float] = [], isActive: Bool = false, accentColor: Color = .blue) {
+    init(amplitudes: [Float] = [], isActive: Bool = false, accentColor: Color = .blue, barCount: Int = 32) {
         self.amplitudes = amplitudes
         self.isActive = isActive
         self.accentColor = accentColor
+        self.barCount = barCount
     }
     
-    private let barCount = 32
     private let minBarHeight: CGFloat = 4
     private let maxBarHeight: CGFloat = 40
     private let barSpacing: CGFloat = 3

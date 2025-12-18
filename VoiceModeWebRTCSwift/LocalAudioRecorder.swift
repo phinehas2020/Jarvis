@@ -20,7 +20,13 @@ class LocalAudioRecorder: NSObject {
             // We use .playAndRecord with .mixWithOthers to coexist with the library's player
             // effectively sharing the RemoteIO
             // .defaultToSpeaker is safer for voice agents
-            try session.setCategory(.playAndRecord, mode: .videoChat, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers, .duckOthers])
+            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [
+                .defaultToSpeaker,
+                .allowBluetooth,
+                .allowBluetoothA2DP,
+                .mixWithOthers,
+                .duckOthers
+            ])
             
             // Try to set strict 16kHz if possible
             do {
@@ -30,6 +36,7 @@ class LocalAudioRecorder: NSObject {
             }
             
             try session.setActive(true, options: .notifyOthersOnDeactivation)
+            AudioSessionManager.shared.applyPreferredInput()
         } catch {
             print("Error setting up audio session: \(error)")
         }
@@ -112,12 +119,23 @@ class LocalAudioRecorder: NSObject {
             
             guard frameCount > 0 else { return }
             
-            // RMS Calculation
+            // Apply Software Gain (Boosting sensitivity)
+            let micGain: Float = 2.5
             var sum: Float = 0
+            
             for i in 0..<frameCount {
-                let sample = Float(channelPointer[i])
-                sum += sample * sample
+                // Apply gain and clamp to Int16 range
+                let boostedSample = Float(channelPointer[i]) * micGain
+                let clampedSample = max(Float(Int16.min), min(Float(Int16.max), boostedSample))
+                let finalSample = Int16(clampedSample)
+                
+                // Update the buffer with boosted sample (for encoding)
+                channelPointer[i] = finalSample
+                
+                // Use boosted sample for RMS Calculation
+                sum += clampedSample * clampedSample
             }
+            
             let rms = sqrt(sum / Float(frameCount))
             
             // Base64 Encoding
