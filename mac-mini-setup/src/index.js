@@ -61,7 +61,13 @@ async function bbFetch(path, options = {}) {
     }
   });
 
-  const data = await response.json();
+  const text = await response.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    data = { error: text };
+  }
   return { status: response.status, data };
 }
 
@@ -95,17 +101,18 @@ const TOOLS = [
   },
   {
     name: 'fetch_messages',
-    description: 'Get messages from a chat. Requires chatGuid.',
+    description: 'Get messages from a chat. Provide chatGuid or handle.',
     inputSchema: {
       type: 'object',
       properties: {
         chatGuid: { type: 'string', description: 'Chat GUID' },
+        handle: { type: 'string', description: 'Contact handle/phone' },
         limit: { type: 'number', default: 50 },
         offset: { type: 'number', default: 0 },
-        after: { type: 'string' },
-        before: { type: 'string' }
+        after: { type: 'string', description: 'EPOCH timestamp' },
+        before: { type: 'string', description: 'EPOCH timestamp' }
       },
-      required: ['chatGuid']
+      required: []
     }
   },
   {
@@ -268,15 +275,40 @@ async function handleTool(name, args, context) {
 
       case 'fetch_messages':
       case 'bluebubbles_get_messages': {
-        const result = await bbFetch(`/api/v1/chat/${encodeURIComponent(args.chatGuid)}/message`, {
-          method: 'POST',
-          body: JSON.stringify({
-            limit: args.limit || 50,
-            offset: args.offset || 0,
-            after: args.after || null,
-            before: args.before || null,
-            sort: 'DESC'
-          })
+        let guid = args.chatGuid;
+
+        // If chatGuid is missing but handle is provided, find the chat
+        if (!guid && args.handle) {
+          console.log(`🔍 Searching for chat with handle: ${args.handle}`);
+          const chatSearch = await bbFetch('/api/v1/chat/query', {
+            method: 'POST',
+            body: JSON.stringify({
+              with: [args.handle],
+              limit: 1
+            })
+          });
+
+          if (chatSearch.status === 200 && chatSearch.data?.data?.length > 0) {
+            guid = chatSearch.data.data[0].guid;
+            console.log(`✅ Found chatGuid: ${guid}`);
+          } else {
+            return { error: `Could not find a chat associated with handle: ${args.handle}. Use bluebubbles_list_chats to find the correct chat.` };
+          }
+        }
+
+        if (!guid) {
+          return { error: "A chatGuid or handle must be provided to fetch messages." };
+        }
+
+        const params = new URLSearchParams();
+        params.set('limit', args.limit || 50);
+        params.set('offset', args.offset || 0);
+        params.set('sort', 'DESC');
+        if (args.after) params.set('after', args.after);
+        if (args.before) params.set('before', args.before);
+
+        const result = await bbFetch(`/api/v1/chat/${encodeURIComponent(guid)}/message?${params.toString()}`, {
+          method: 'GET'
         });
         return result;
       }
