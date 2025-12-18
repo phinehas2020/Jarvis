@@ -167,6 +167,53 @@ const TOOLS = [
     }
   },
   {
+    name: 'send_tapback',
+    description: 'React to a specific message with an emoji (Love, Like, Dislike, Laugh, Question, Emphasize). Needs Private API.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chatGuid: { type: 'string', description: 'The GUID of the chat conversation' },
+        messageGuid: { type: 'string', description: 'The GUID of the message to react to' },
+        reaction: { type: 'string', enum: ['love', 'like', 'dislike', 'laugh', 'question', 'emphasize'], description: 'The type of reaction' }
+      },
+      required: ['chatGuid', 'messageGuid', 'reaction']
+    }
+  },
+  {
+    name: 'rename_group',
+    description: 'Change the display name of a group chat. Needs Private API.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chatGuid: { type: 'string', description: 'The GUID of the group chat' },
+        displayName: { type: 'string', description: 'The new name for the group' }
+      },
+      required: ['chatGuid', 'displayName']
+    }
+  },
+  {
+    name: 'mark_chat_read',
+    description: 'Mark all messages in a chat as read. Needs Private API.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chatGuid: { type: 'string', description: 'The GUID of the chat' }
+      },
+      required: ['chatGuid']
+    }
+  },
+  {
+    name: 'get_handles',
+    description: 'Fetch all available contact handles (phone numbers/emails) known to the server.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', default: 100 }
+      },
+      required: []
+    }
+  },
+  {
     name: 'bluebubbles_get_attachment',
     description: 'Get attachment metadata.',
     inputSchema: {
