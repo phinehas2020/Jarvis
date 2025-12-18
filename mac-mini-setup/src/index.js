@@ -355,7 +355,7 @@ async function handleTool(name, args, context) {
             computerAgentBusy = true;
             try {
               const { model } = args;
-              const result = await runComputerAgent({ task, maxSteps, model });
+              const result = await runComputerAgent({ task, maxSteps, model, handleTool }, context);
 
               const summary = result.summary || 'Task completed without summary.';
               const status = result.status;
@@ -407,7 +407,7 @@ async function handleTool(name, args, context) {
         // Foreground Mode (Wait for result)
         computerAgentBusy = true;
         try {
-          const result = await runComputerAgent(args);
+          const result = await runComputerAgent({ ...args, handleTool }, context);
           return result;
         } catch (error) {
           const message = String(error?.message || error);

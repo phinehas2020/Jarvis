@@ -104,6 +104,7 @@ const STEP_SCHEMA = {
             'browser_type',
             'browser_scroll',
             'browser_extract_text',
+            'send_imessage',
             'done'
           ]
         },
@@ -264,6 +265,16 @@ async function executeToolAction(action) {
     case 'browser_screenshot':
       return browser_screenshot({ fullPage: params.fullPage });
 
+    case 'send_imessage': {
+      if (!action.bridgeHandleTool) {
+        throw new Error('send_imessage is only available when running through the bridge');
+      }
+      return action.bridgeHandleTool('send_imessage', {
+        to: requireString(params.to, 'to'),
+        message: requireString(params.message || params.text, 'message')
+      }, action.bridgeContext);
+    }
+
     default:
       throw new Error(`Unknown tool: ${tool}`);
   }
@@ -326,7 +337,7 @@ function summarizeToolResult(result) {
   return '(ok)';
 }
 
-export async function runComputerAgent(options) {
+export async function runComputerAgent(options, bridgeContext) {
   // Close browser on completion if needed, but for now we keep it persistent across the session
   // (It will be closed when the process restarts or if we add explicit cleanup logic)
 
@@ -336,7 +347,8 @@ export async function runComputerAgent(options) {
     model = process.env.COMPUTER_AGENT_MODEL || 'grok-4.1-fast',
     imageDetail = process.env.COMPUTER_AGENT_IMAGE_DETAIL || 'high',
     postActionWaitMs = Number(process.env.COMPUTER_AGENT_POST_ACTION_WAIT_MS || 300),
-    includeFinalScreenshot = true
+    includeFinalScreenshot = true,
+    handleTool: bridgeHandleTool // Callback from the bridge
   } = options || {};
 
   requireString(task, 'task');
@@ -413,7 +425,9 @@ export async function runComputerAgent(options) {
 
     let toolResult;
     try {
-      toolResult = await executeToolAction(action);
+      // Inject bridge context into action if needed
+      const enrichedAction = { ...action, bridgeHandleTool, bridgeContext };
+      toolResult = await executeToolAction(enrichedAction);
     } catch (error) {
       toolResult = { error: error.message };
     }

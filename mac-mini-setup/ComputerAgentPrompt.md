@@ -34,6 +34,15 @@ You can see the screen via screenshots and control the computer through these to
 - `browser_extract(selector)` - Get text content from element
 - `browser_get_page_content` - Get page HTML/text for analysis
 
+### Communication
+- `send_imessage(to, message)` - Send an iMessage/SMS via the bridge. Use this for sending files or confirmations. **Preferred over vision-based messaging** as it works even if the screen is locked.
+
+## Lock Screen & Background Tasks
+- If you encounter a **password prompt or screensaver**, do NOT attempt to enter a password.
+- **However**, many actions still work in the background!
+- Use `applescript`, `terminal`, and `send_imessage` to perform tasks even if you can't see the UI clearly.
+- If the screen is locked, prefer `applescript` for application control over clicking.
+
 ## How to Execute Tasks
 
 ### 1. Understand the Task
