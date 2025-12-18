@@ -109,6 +109,8 @@ const STEP_SCHEMA = {
             'rename_group',
             'mark_chat_read',
             'get_handles',
+            'fetch_messages',
+            'get_recent_messages',
             'done'
           ]
         },
@@ -305,7 +307,30 @@ async function executeToolAction(action) {
 
     case 'get_handles': {
       if (!action.bridgeHandleTool) throw new Error('Tool only available via bridge');
-      return action.bridgeHandleTool('get_handles', {}, action.bridgeContext);
+      return action.bridgeHandleTool('get_handles', {
+        chatGuid: params.chatGuid,
+        query: params.query
+      }, action.bridgeContext);
+    }
+
+    case 'fetch_messages': {
+      if (!action.bridgeHandleTool) throw new Error('Tool only available via bridge');
+      return action.bridgeHandleTool('fetch_messages', {
+        chatGuid: params.chatGuid,
+        handle: params.handle,
+        limit: params.limit,
+        offset: params.offset,
+        after: params.after,
+        before: params.before
+      }, action.bridgeContext);
+    }
+
+    case 'get_recent_messages': {
+      if (!action.bridgeHandleTool) throw new Error('Tool only available via bridge');
+      return action.bridgeHandleTool('get_recent_messages', {
+        chatLimit: params.chatLimit,
+        messagesPerChat: params.messagesPerChat
+      }, action.bridgeContext);
     }
 
     default:

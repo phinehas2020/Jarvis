@@ -101,16 +101,28 @@ const TOOLS = [
   },
   {
     name: 'fetch_messages',
-    description: 'Get messages from a chat. Provide chatGuid or handle.',
+    description: 'Get messages from a chat. Provide chatGuid, handle, or contact name.',
     inputSchema: {
       type: 'object',
       properties: {
         chatGuid: { type: 'string', description: 'Chat GUID' },
-        handle: { type: 'string', description: 'Contact handle/phone' },
+        handle: { type: 'string', description: 'Contact handle, phone, or Nickname (e.g. Sweetheart)' },
         limit: { type: 'number', default: 50 },
         offset: { type: 'number', default: 0 },
         after: { type: 'string', description: 'EPOCH timestamp' },
         before: { type: 'string', description: 'EPOCH timestamp' }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'get_recent_messages',
+    description: 'Get an overview of recent activity across all your chats. Shows the latest messages from the top 5 most recently active threads.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chatLimit: { type: 'number', description: 'Number of chats to check (default: 5)', default: 5 },
+        messagesPerChat: { type: 'number', description: 'Messages per chat (default: 2)', default: 2 }
       },
       required: []
     }
@@ -277,9 +289,11 @@ async function handleTool(name, args, context) {
       case 'bluebubbles_get_messages': {
         let guid = args.chatGuid;
 
-        // If chatGuid is missing but handle is provided, find the chat
+        // If chatGuid is missing but handle/name is provided, find the chat
         if (!guid && args.handle) {
-          console.log(`🔍 Searching for chat with handle: ${args.handle}`);
+          console.log(`🔍 Searching for chat with identifier: ${args.handle}`);
+
+          // Step 1: Try handle/phone search (POST /query)
           const chatSearch = await bbFetch('/api/v1/chat/query', {
             method: 'POST',
             body: JSON.stringify({
@@ -290,14 +304,32 @@ async function handleTool(name, args, context) {
 
           if (chatSearch.status === 200 && chatSearch.data?.data?.length > 0) {
             guid = chatSearch.data.data[0].guid;
-            console.log(`✅ Found chatGuid: ${guid}`);
+            console.log(`✅ Found chatGuid by handle: ${guid}`);
           } else {
-            return { error: `Could not find a chat associated with handle: ${args.handle}. Use bluebubbles_list_chats to find the correct chat.` };
+            // Step 2: Fallback to searching all chats for a display name match (nicknames like "Sweetheart")
+            console.log(`🕵️ Handle search failed. Searching display names for "${args.handle}"...`);
+            const allChats = await bbFetch('/api/v1/chat?limit=100');
+            if (allChats.status === 200 && allChats.data?.data) {
+              const searchTerm = args.handle.toLowerCase();
+              const match = allChats.data.data.find(c =>
+                (c.displayName && c.displayName.toLowerCase().includes(searchTerm)) ||
+                (c.title && c.title.toLowerCase().includes(searchTerm))
+              );
+
+              if (match) {
+                guid = match.guid;
+                console.log(`🎯 Found chatGuid by display name: ${guid} (${match.displayName})`);
+              }
+            }
+          }
+
+          if (!guid) {
+            return { error: `Could not find a chat associated with "${args.handle}". Use bluebubbles_list_chats to see your active threads.` };
           }
         }
 
         if (!guid) {
-          return { error: "A chatGuid or handle must be provided to fetch messages." };
+          return { error: "A chatGuid, handle, or contact name must be provided to fetch messages." };
         }
 
         const params = new URLSearchParams();
@@ -311,6 +343,32 @@ async function handleTool(name, args, context) {
           method: 'GET'
         });
         return result;
+      }
+
+      case 'get_recent_messages': {
+        const chatLimit = args.chatLimit || 5;
+        const messagesPerChat = args.messagesPerChat || 2;
+
+        console.log(`📥 Pulling activity: ${chatLimit} chats, ${messagesPerChat} messages/chat`);
+
+        // 1. Get recent chats sorted by last message
+        const chatsResult = await bbFetch(`/api/v1/chat?sort=lastmessage&limit=${chatLimit}`);
+        if (chatsResult.status !== 200 || !chatsResult.data?.data) return chatsResult;
+
+        const chats = chatsResult.data.data;
+        const result = [];
+
+        // 2. For each chat, get the latest N messages
+        for (const chat of chats) {
+          const msgResult = await bbFetch(`/api/v1/chat/${encodeURIComponent(chat.guid)}/message?limit=${messagesPerChat}&sort=DESC`);
+          result.push({
+            chatName: chat.displayName || chat.title || 'Unknown Chat',
+            chatGuid: chat.guid,
+            messages: msgResult.status === 200 ? msgResult.data?.data : []
+          });
+        }
+
+        return { success: true, activity: result };
       }
 
       case 'send_imessage':
