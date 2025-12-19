@@ -1110,7 +1110,8 @@ class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
                     }
                 }
                 
-                let reminderTitle = reminderTitleValue.isEmpty ? "Untitled Reminder" : reminderTitleValue
+                let titleValue = reminderTitleValue ?? ""
+                let reminderTitle = titleValue.isEmpty ? "Untitled Reminder" : titleValue
                 
                 var reminderDict: [String: Any] = [
                     "reminder_id": reminderId,
