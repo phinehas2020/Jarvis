@@ -884,6 +884,25 @@ class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
         }
     }
     
+    func requestMediaLibraryPermission() {
+        MPMediaLibrary.requestAuthorization { status in
+            DispatchQueue.main.async {
+                switch status {
+                case .authorized:
+                    print("🎵 Media Library permission granted")
+                case .denied:
+                    print("❌ Media Library permission denied")
+                case .restricted:
+                    print("❌ Media Library permission restricted")
+                case .notDetermined:
+                    print("❓ Media Library permission not determined")
+                @unknown default:
+                    print("❓ Media Library permission unknown status")
+                }
+            }
+        }
+    }
+    
     func createCalendarEvent(title: String, startDate: Date, endDate: Date) -> [String: Any] {
         let event = EKEvent(eventStore: eventStore)
         event.title = title
@@ -1437,10 +1456,14 @@ class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
             if let artistItems = artistQuery.items { allItems.append(contentsOf: artistItems) }
             if let albumItems = albumQuery.items { allItems.append(contentsOf: albumItems) }
             
+            print("🎵 Music Search: Found \(allItems.count) results for '\(query)'")
+            
             // Remove duplicates based on persistent ID
             uniqueItems = Array(Set(allItems.map { $0.persistentID })).compactMap { id in
                 allItems.first { $0.persistentID == id }
             }
+            
+            print("🎵 Music Search: \(uniqueItems.count) unique items after deduplication")
             
             // Create a new query with the combined results
             mediaQuery = MPMediaQuery.songs()
@@ -1507,9 +1530,12 @@ class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
         // Create a collection with just this song
         let collection = MPMediaItemCollection(items: [bestMatch])
         
-        // Set the queue and play
-        musicPlayer.setQueue(with: collection)
-        musicPlayer.play()
+        // Use MainActor for player controls
+        DispatchQueue.main.async {
+            print("🎵 Music Search: Playing '\(bestMatch.title ?? "Unknown")' by \(bestMatch.artist ?? "Unknown")")
+            musicPlayer.setQueue(with: collection)
+            musicPlayer.play()
+        }
         
         // Prepare results
         var results: [String: Any] = [

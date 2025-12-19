@@ -375,6 +375,9 @@ struct ContentView: View {
         // Request contacts permission
         webrtcManager.requestContactsPermission()
         
+        // Request media library permission
+        webrtcManager.requestMediaLibraryPermission()
+        
         if selectedProvider == .openAI, apiKey.isEmpty {
             showOptionsSheet = true
         } else if selectedProvider == .gemini, geminiApiKey.isEmpty {
