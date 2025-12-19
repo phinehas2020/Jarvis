@@ -7,6 +7,8 @@ struct StartJarvisIntent: LiveActivityIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
+        // AppIntents in Live Activities run in the main app process.
+        // We use NotificationCenter to avoid the Widget target needing a dependency on WebRTCManager.
         NotificationCenter.default.post(name: .startJarvisFromIntent, object: nil)
         return .result()
     }

@@ -18,6 +18,8 @@ import ActivityKit
 
 // MARK: - WebRTCManager
 class WebRTCManager: NSObject, ObservableObject {
+    static let shared = WebRTCManager()
+    
     // UI State
     @Published var connectionStatus: ConnectionStatus = .disconnected
     @Published var eventTypeStr: String = ""
@@ -140,7 +142,7 @@ class WebRTCManager: NSObject, ObservableObject {
         NotificationCenter.default.addObserver(forName: .startJarvisFromIntent, object: nil, queue: .main) { [weak self] _ in
             self?.startConnectionWithStoredConfig()
         }
-        
+
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             self?.startLiveActivity()
         }
@@ -3764,6 +3766,10 @@ class WebRTCManager: NSObject, ObservableObject {
         geminiLiveEndpoint: String?,
         xaiApiKey: String?
     ) {
+        // 0. Ensure audio session is configured EARLY for background priority
+        configureAudioSession()
+        enableBackgroundMode()
+        
         if provider == .gemini {
             print("🔷 Using Gemini Provider")
             let resolvedApiKey = (geminiApiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)

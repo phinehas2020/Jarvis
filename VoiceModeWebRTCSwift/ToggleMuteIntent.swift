@@ -7,9 +7,8 @@ struct ToggleMuteIntent: LiveActivityIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        // We need to access the WebRTCManager to toggle the mute state.
-        // Since we can't easily get the specific instance from here, 
-        // we'll use a notification that the main app listens for.
+        // AppIntents in Live Activities run in the main app process.
+        // We use NotificationCenter to avoid the Widget target needing a dependency on WebRTCManager.
         NotificationCenter.default.post(name: .toggleMuteFromIntent, object: nil)
         return .result()
     }

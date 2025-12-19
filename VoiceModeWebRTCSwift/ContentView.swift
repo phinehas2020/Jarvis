@@ -4,7 +4,7 @@ import AVFoundation
 let API_KEY = "your_openai_api_key"
 
 struct ContentView: View {
-    @StateObject private var webrtcManager = WebRTCManager()
+    @StateObject private var webrtcManager = WebRTCManager.shared
     
     @State private var showOptionsSheet = false
     @FocusState private var isTextFieldFocused: Bool
