@@ -842,7 +842,7 @@ class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
     
     func requestCalendarPermission() {
         if #available(iOS 17.0, *) {
-            eventStore.requestFullAccessToEvents { [weak self] granted, error in
+            eventStore.requestFullAccessToEvents { granted, error in
                 DispatchQueue.main.async {
                     if granted {
                         print("🗓️ Calendar permission granted")
@@ -852,7 +852,7 @@ class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
                 }
             }
             
-            eventStore.requestFullAccessToReminders { [weak self] granted, error in
+            eventStore.requestFullAccessToReminders { granted, error in
                 DispatchQueue.main.async {
                     if granted {
                         print("🔔 Reminders permission granted")
@@ -862,7 +862,7 @@ class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
                 }
             }
         } else {
-            eventStore.requestAccess(to: .event) { [weak self] granted, error in
+            eventStore.requestAccess(to: .event) { granted, error in
                 DispatchQueue.main.async {
                     if granted {
                         print("🗓️ Calendar permission granted")
@@ -872,7 +872,7 @@ class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
                 }
             }
             
-            eventStore.requestAccess(to: .reminder) { [weak self] granted, error in
+            eventStore.requestAccess(to: .reminder) { granted, error in
                 DispatchQueue.main.async {
                     if granted {
                         print("🔔 Reminders permission granted")
@@ -1092,7 +1092,8 @@ class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
                 
                 // Filter by title if specified
                 if let title = title {
-                    if !reminderTitleValue.lowercased().contains(title.lowercased()) {
+                    let titleValue = reminderTitleValue ?? ""
+                    if !titleValue.lowercased().contains(title.lowercased()) {
                         continue
                     }
                 }
