@@ -70,7 +70,7 @@ final class AudioSessionManager {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .videoChat, options: [
                 .defaultToSpeaker,
-                .allowBluetooth,
+                .allowBluetoothHFP,
                 .mixWithOthers,
                 .duckOthers
             ])

@@ -17,7 +17,7 @@ import IntentsUI
 import ActivityKit
 
 // MARK: - WebRTCManager
-class WebRTCManager: NSObject, ObservableObject {
+class WebRTCManager: NSObject, ObservableObject, @unchecked Sendable {
     static let shared = WebRTCManager()
     
     // UI State
@@ -841,22 +841,44 @@ class WebRTCManager: NSObject, ObservableObject {
     private let eventStore = EKEventStore()
     
     func requestCalendarPermission() {
-        eventStore.requestAccess(to: .event) { granted, error in
-            DispatchQueue.main.async {
-                if granted {
-                    print("🗓️ Calendar permission granted")
-                } else {
-                    print("❌ Calendar permission denied: \(error?.localizedDescription ?? "unknown")")
+        if #available(iOS 17.0, *) {
+            eventStore.requestFullAccessToEvents { [weak self] granted, error in
+                DispatchQueue.main.async {
+                    if granted {
+                        print("🗓️ Calendar permission granted")
+                    } else {
+                        print("❌ Calendar permission denied: \(error?.localizedDescription ?? "unknown")")
+                    }
                 }
             }
-        }
-        
-        eventStore.requestAccess(to: .reminder) { granted, error in
-            DispatchQueue.main.async {
-                if granted {
-                    print("🔔 Reminders permission granted")
-                } else {
-                    print("❌ Reminders permission denied: \(error?.localizedDescription ?? "unknown")")
+            
+            eventStore.requestFullAccessToReminders { [weak self] granted, error in
+                DispatchQueue.main.async {
+                    if granted {
+                        print("🔔 Reminders permission granted")
+                    } else {
+                        print("❌ Reminders permission denied: \(error?.localizedDescription ?? "unknown")")
+                    }
+                }
+            }
+        } else {
+            eventStore.requestAccess(to: .event) { [weak self] granted, error in
+                DispatchQueue.main.async {
+                    if granted {
+                        print("🗓️ Calendar permission granted")
+                    } else {
+                        print("❌ Calendar permission denied: \(error?.localizedDescription ?? "unknown")")
+                    }
+                }
+            }
+            
+            eventStore.requestAccess(to: .reminder) { [weak self] granted, error in
+                DispatchQueue.main.async {
+                    if granted {
+                        print("🔔 Reminders permission granted")
+                    } else {
+                        print("❌ Reminders permission denied: \(error?.localizedDescription ?? "unknown")")
+                    }
                 }
             }
         }
@@ -979,7 +1001,7 @@ class WebRTCManager: NSObject, ObservableObject {
         do {
             try eventStore.save(reminder, commit: true)
             print("🔔 Reminder created successfully: \(title)")
-            let reminderId = reminder.calendarItemIdentifier ?? UUID().uuidString
+            let reminderId = reminder.calendarItemIdentifier
             return ["status": "success", "reminder_id": reminderId]
         } catch {
             print("❌ Failed to save reminder: \(error)")
@@ -1020,7 +1042,7 @@ class WebRTCManager: NSObject, ObservableObject {
         do {
             try eventStore.save(reminder, commit: true)
             print("🔔 Reminder edited successfully: \(reminderId)")
-            let updatedReminderId = reminder.calendarItemIdentifier ?? reminderId
+            let updatedReminderId = reminder.calendarItemIdentifier
             return ["status": "success", "reminder_id": updatedReminderId]
         } catch {
             print("❌ Failed to edit reminder: \(error)")
@@ -1042,8 +1064,8 @@ class WebRTCManager: NSObject, ObservableObject {
             }
             
             for reminder in reminders {
-                let reminderId = reminder.calendarItemIdentifier ?? UUID().uuidString
-                let reminderTitleValue = reminder.title ?? ""
+                let reminderId = reminder.calendarItemIdentifier
+                let reminderTitleValue = reminder.title
                 // Filter by completion status if specified
                 if let completed = completed, reminder.isCompleted != completed {
                     continue
@@ -2478,19 +2500,19 @@ class WebRTCManager: NSObject, ObservableObject {
         }
 
         return try await withCheckedThrowingContinuation { continuation in
-            mcpLock.lock()
-            mcpPendingResponses[rpcId] = { response in
-                continuation.resume(returning: response)
+            mcpLock.withLock {
+                mcpPendingResponses[rpcId] = { response in
+                    continuation.resume(returning: response)
+                }
             }
-            mcpLock.unlock()
             
             Task {
                 do {
                     try await mcpWebSocketTask?.send(.string(jsonText))
                 } catch {
-                    mcpLock.lock()
-                    _ = mcpPendingResponses.removeValue(forKey: rpcId)
-                    mcpLock.unlock()
+                    mcpLock.withLock {
+                        _ = mcpPendingResponses.removeValue(forKey: rpcId)
+                    }
                     continuation.resume(throwing: error)
                 }
             }
@@ -2498,33 +2520,38 @@ class WebRTCManager: NSObject, ObservableObject {
             // Timeout after 120 seconds for computer agent
             DispatchQueue.global().asyncAfter(deadline: .now() + 120) { [weak self] in
                 guard let self = self else { return }
-                self.mcpLock.lock()
-                if let _ = self.mcpPendingResponses.removeValue(forKey: rpcId) {
-                    self.mcpLock.unlock()
+                let removed = self.mcpLock.withLock {
+                    self.mcpPendingResponses.removeValue(forKey: rpcId)
+                }
+                
+                if removed != nil {
                     continuation.resume(throwing: NSError(domain: "WebRTCManager.MCP", code: -4, userInfo: [NSLocalizedDescriptionKey: "MCP Request Timed Out"]))
-                } else {
-                    self.mcpLock.unlock()
                 }
             }
         }
     }
 
     private func ensureMcpConnected(serverUrl: URL, authorization: String?) async throws {
-        mcpLock.lock()
-        if mcpWebSocketTask != nil && mcpWebSocketTask?.state == .running {
-            mcpLock.unlock()
+        let isConnected = mcpLock.withLock {
+            mcpWebSocketTask != nil && mcpWebSocketTask?.state == .running
+        }
+        if isConnected {
             return
         }
         
-        if isMcpConnecting {
-            mcpLock.unlock()
+        let alreadyConnecting = mcpLock.withLock {
+            if isMcpConnecting {
+                return true
+            }
+            isMcpConnecting = true
+            return false
+        }
+        
+        if alreadyConnecting {
             // Wait for existing connection attempt
             try await Task.sleep(nanoseconds: 500 * 1_000_000)
             return try await ensureMcpConnected(serverUrl: serverUrl, authorization: authorization)
         }
-        
-        isMcpConnecting = true
-        mcpLock.unlock()
         
         print("🔌 MCP: Establishing persistent connection to \(serverUrl.absoluteString)...")
         
@@ -2537,10 +2564,10 @@ class WebRTCManager: NSObject, ObservableObject {
         let task = URLSession.shared.webSocketTask(with: request)
         task.resume()
         
-        mcpLock.lock()
-        self.mcpWebSocketTask = task
-        self.isMcpConnecting = false
-        mcpLock.unlock()
+        mcpLock.withLock {
+            self.mcpWebSocketTask = task
+            self.isMcpConnecting = false
+        }
         
         startMcpListeningLoop(task: task)
     }
@@ -3774,7 +3801,7 @@ class WebRTCManager: NSObject, ObservableObject {
             print("🔷 Using Gemini Provider")
             let resolvedApiKey = (geminiApiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let resolvedModel = (geminiModel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let resolvedEndpoint = (geminiLiveEndpoint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            _ = (geminiLiveEndpoint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard !resolvedApiKey.isEmpty else {
                 let errorItem = ConversationItem(

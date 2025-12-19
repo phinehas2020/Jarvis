@@ -22,7 +22,7 @@ class LocalAudioRecorder: NSObject {
             // .defaultToSpeaker is safer for voice agents
             try session.setCategory(.playAndRecord, mode: .voiceChat, options: [
                 .defaultToSpeaker,
-                .allowBluetooth,
+                .allowBluetoothHFP,
                 .allowBluetoothA2DP,
                 .mixWithOthers,
                 .duckOthers

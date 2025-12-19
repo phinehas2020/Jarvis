@@ -357,8 +357,14 @@ struct ContentView: View {
     
     private func requestMicrophonePermission() {
         // Request microphone permission
-        AVAudioSession.sharedInstance().requestRecordPermission { granted in
-            print("🎤 Microphone permission granted: \(granted)")
+        if #available(iOS 17.0, *) {
+            AVAudioApplication.requestRecordPermission { granted in
+                print("🎤 Microphone permission granted: \(granted)")
+            }
+        } else {
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                print("🎤 Microphone permission granted: \(granted)")
+            }
         }
         
         // Request camera permission
@@ -604,7 +610,7 @@ struct ContentView: View {
                         .padding(.top, 8)
                         .padding(.bottom, 20)
                     }
-                    .onChange(of: webrtcManager.conversation.count) { _ in
+                    .onChange(of: webrtcManager.conversation.count) { _, _ in
                         if let lastId = webrtcManager.conversation.last?.id {
                             withAnimation {
                                 proxy.scrollTo(lastId, anchor: .bottom)
